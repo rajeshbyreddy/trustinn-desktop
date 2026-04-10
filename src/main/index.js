@@ -578,10 +578,14 @@ function createWindow() {
     }
   });
 
-  const devUrl = process.env.VITE_DEV_SERVER_URL || "http://localhost:5173";
-  mainWindow.loadURL(devUrl).catch(() => {
+  const devUrl = process.env.VITE_DEV_SERVER_URL;
+  if (devUrl) {
+    mainWindow.loadURL(devUrl).catch(() => {
+      mainWindow.loadFile(path.join(__dirname, "..", "..", "dist", "index.html"));
+    });
+  } else {
     mainWindow.loadFile(path.join(__dirname, "..", "..", "dist", "index.html"));
-  });
+  }
 }
 
 app.whenReady().then(() => {

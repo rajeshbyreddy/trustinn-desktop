@@ -1,6 +1,6 @@
 {
   "name": "trustinn-desktop",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Trustinn Desktop - Unified Tool Runner",
   "author": "Trustinn",
   "main": "src/main/index.js",
@@ -14,7 +14,7 @@
     "start": "npm run electron-dev",
     "docker:build": "docker build -f docker/Dockerfile -t pasup/trustinn-tools:2.0.0 /home/rajesh",
     "docker:push": "docker push pasup/trustinn-tools:2.0.0",
-    "dist:win": "npm run build && electron-builder --win nsis --publish never",
+    "dist:win": "npm run build && electron-builder --win nsis portable --publish never",
     "release:tag": "git tag v2.0.0 && git push origin v2.0.0"
   },
   "dependencies": {
