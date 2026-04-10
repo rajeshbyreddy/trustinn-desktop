@@ -1,6 +1,6 @@
 {
   "name": "trustinn-desktop",
-  "version": "2.0.1",
+  "version": "2.0.4",
   "description": "Trustinn Desktop - Unified Tool Runner",
   "author": "Trustinn",
   "main": "src/main/index.js",

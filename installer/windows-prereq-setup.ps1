@@ -17,14 +17,14 @@ Add-Type -AssemblyName System.Windows.Forms
 
 Write-Host "[Trustinn] Checking Windows prerequisites..."
 
-function Finish-Safely([string]$message) {
+function Finish-Safely([string]$message, [int]$exitCode = 0) {
   Write-Host "[Trustinn] $message"
   try {
     Stop-Transcript | Out-Null
   } catch {
     # Ignore transcript close failure.
   }
-  exit 0
+  exit $exitCode
 }
 
 function Wait-DockerReady([int]$timeoutSeconds = 300) {
@@ -59,12 +59,12 @@ if (-not $wslInstalled) {
         "OK",
         "Information"
       ) | Out-Null
-      Finish-Safely "WSL install initiated."
+      Finish-Safely "WSL install initiated. Re-run installer after restart/completion." 10
     } catch {
-      Finish-Safely "WSL install failed or was cancelled by user."
+      Finish-Safely "WSL install failed or was cancelled by user." 11
     }
   } else {
-    Finish-Safely "WSL install skipped by user."
+    Finish-Safely "WSL install skipped by user." 12
   }
 }
 
@@ -86,12 +86,12 @@ if (-not $wslDistroReady) {
         "OK",
         "Information"
       ) | Out-Null
-      Finish-Safely "WSL distro install initiated."
+      Finish-Safely "WSL distro install initiated. Re-run installer after distro setup." 20
     } catch {
-      Finish-Safely "WSL distro install failed or was cancelled by user."
+      Finish-Safely "WSL distro install failed or was cancelled by user." 21
     }
   } else {
-    Finish-Safely "WSL distro install skipped by user."
+    Finish-Safely "WSL distro install skipped by user." 22
   }
 }
 
@@ -133,7 +133,7 @@ if (-not $dockerInstalled) {
     if (Ask-YesNo "Docker Desktop is required. Automatic install failed. Open download page now?") {
       Start-Process "https://www.docker.com/products/docker-desktop/"
     }
-    Finish-Safely "Docker is not installed yet."
+    Finish-Safely "Docker is not installed yet." 30
   }
 }
 
@@ -154,7 +154,7 @@ if (-not $dockerReady) {
   }
 
   if (-not (Wait-DockerReady 300)) {
-    Finish-Safely "Docker Desktop is installed but not ready. Start Docker Desktop, wait until running, then launch Trustinn again."
+    Finish-Safely "Docker Desktop is installed but not ready. Start Docker Desktop, wait until running, then launch Trustinn again." 31
   }
 }
 
@@ -170,14 +170,14 @@ $wslCmd = @(
 try {
   wsl -u root bash -lc $wslCmd
 } catch {
-  Finish-Safely "Dependency install in WSL failed. Please retry after opening Ubuntu once manually."
+  Finish-Safely "Dependency install in WSL failed. Please retry after opening Ubuntu once manually." 40
 }
 
 Write-Host "[Trustinn] Pulling Trustinn Docker image..."
 try {
   docker pull rajeshbyreddy95/trustinn-tools:2.0.1
 } catch {
-  Finish-Safely "Docker image pull failed. Please run 'docker pull rajeshbyreddy95/trustinn-tools:2.0.1' manually."
+  Finish-Safely "Docker image pull failed. Please run 'docker pull rajeshbyreddy95/trustinn-tools:2.0.1' manually." 41
 }
 
 Finish-Safely "Prerequisites setup complete."
