@@ -125,12 +125,7 @@ const toDisplayPath = (targetPath) => {
 };
 
 const getTrustinnDownloadsRoot = () => {
-  if (isWslEnvironment()) {
-    return path.join(resolveWslWindowsDownloadsDir(), "TrustinnDownloads");
-  }
-
-  const downloadsPath = path.join(os.homedir(), "Downloads");
-  return path.join(downloadsPath, "TrustinnDownloads");
+  return "/mnt/c/Users/Public/Downloads/TrustinnDownloads";
 };
 
 const snapshotTopLevelEntries = (dirPath) => {

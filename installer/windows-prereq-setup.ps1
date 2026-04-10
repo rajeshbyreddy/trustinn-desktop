@@ -45,7 +45,7 @@ if (-not $dockerInstalled) {
 Write-Host "[Trustinn] Installing WSL dependencies..."
 $wslCmd = @(
   "sudo apt-get update",
-  "sudo apt-get install -y python3-pip python3-tabulate clang z3 cbmc g++",
+  "sudo apt-get install -y python3-pip python3-tabulate python-is-python3 clang z3 cbmc g++ libtcmalloc-minimal4",
   "sudo apt-get install -y jbmc || true",
   "pip3 install --break-system-packages tabulate"
 ) -join " && "
