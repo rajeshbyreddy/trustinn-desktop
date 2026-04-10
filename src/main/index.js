@@ -68,16 +68,11 @@ const EXTENSIONS = {
 const OUTPUT_DIR_PATTERN = /\/(results?|outputs?|reports?|logs?|temp|tmp|tc|klee-out|dist|build)\//i;
 const OUTPUT_NAME_PATTERN = /(results?|outputs?|reports?|logs?|temp|tmp|tc|klee-out|coverage|mutant)/i;
 const STRICT_CLEAN_TOOLS = new Set(["DSE based Mutation Analyser"]);
-const DOCKER_IMAGE = process.env.TRUSTINN_DOCKER_IMAGE || "pasup/trustinn-tools:1.1.1";
+const DOCKER_IMAGE = process.env.TRUSTINN_DOCKER_IMAGE || "pasup/trustinn-tools:2.0.0";
 const USE_DOCKER_RUNTIME = true;
 const CONTAINER_RESULTS_ROOT = "/results";
 const HOST_TRUSTINN_ROOT = "/mnt/d/TRUSTINN";
 const CONTAINER_TRUSTINN_ROOT = "/mnt/d/TRUSTINN";
-const TOOLS_REQUIRING_TRACERX = new Set([
-  "Dynamic Symbolic Execution",
-  "Dynamic Symbolic Execution with Pruning",
-  "DSE based Mutation Analyser"
-]);
 
 function getToolConfig(language, tool) {
   const byLanguage = TOOL_CONFIG[language];
@@ -454,12 +449,6 @@ function relocateArtifacts(toolRoot, tool, samplePath, beforeSnapshot) {
 
 async function runTool(event, language, tool, samplePath, params) {
   if (USE_DOCKER_RUNTIME) {
-    if (TOOLS_REQUIRING_TRACERX.has(tool) && !fs.existsSync(HOST_TRUSTINN_ROOT)) {
-      const msg = `Required WSL path not found: ${HOST_TRUSTINN_ROOT}. Please ensure WSL can access this exact mount path.`;
-      event?.sender?.send("tool-output", { type: "stderr", data: `Error: ${msg}` });
-      return { ok: false, code: 1, output: msg, outputDir: null, movedArtifacts: [] };
-    }
-
     const outputDir = getContainerOutputDir(tool, samplePath);
     const args = getDockerArgs([
       "run-tool",

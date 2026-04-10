@@ -53,6 +53,6 @@ $wslCmd = @(
 wsl bash -lc $wslCmd
 
 Write-Host "[Trustinn] Pulling Trustinn Docker image..."
-docker pull pasup/trustinn-tools:1.1.1
+docker pull pasup/trustinn-tools:2.0.0
 
 Write-Host "[Trustinn] Prerequisites setup complete."

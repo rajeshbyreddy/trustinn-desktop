@@ -73,6 +73,99 @@ def resolve_sample_root(tool_root: Path, config: dict) -> Path:
     return candidate if candidate.exists() else tool_root
 
 
+def _replace_with_directory(target: Path) -> None:
+    if target.exists() and not target.is_dir():
+        target.unlink(missing_ok=True)
+    target.mkdir(parents=True, exist_ok=True)
+
+
+def ensure_advance_tool_layout(tool_root: Path) -> None:
+    required_dirs = [
+        tool_root / "CBMC",
+        tool_root / "Programs",
+        tool_root / "Programs" / "GCOV",
+        tool_root / "Programs" / "CBMC",
+        tool_root / "SequenceGenerator",
+    ]
+
+    fallback_roots = [
+        BASE_ROOT / "TRUSTINN" / "TRUSTINN" / "ADVANCE_CODE_COVERAGE_PROFILER",
+        BASE_ROOT / "TRUSTINN" / "ADVANCE_CODE_COVERAGE_PROFILER",
+    ]
+
+    for req in required_dirs:
+        if req.exists() and req.is_dir():
+            continue
+
+        copied = False
+        for fallback_root in fallback_roots:
+            source = fallback_root / req.relative_to(tool_root)
+            if source.exists() and source.is_dir():
+                if req.exists() and not req.is_dir():
+                    req.unlink(missing_ok=True)
+                shutil.copytree(source, req, dirs_exist_ok=True)
+                copied = True
+                break
+
+        if not copied:
+            _replace_with_directory(req)
+
+
+def stage_advance_sample(tool_root: Path, sample_path: str) -> None:
+    source = Path(sample_path)
+    if not source.exists() or source.suffix.lower() != ".c":
+        return
+
+    gcov_target = tool_root / "Programs" / "GCOV" / source.name
+    cbmc_target = tool_root / "Programs" / "CBMC" / source.name
+    shutil.copy2(source, gcov_target)
+    shutil.copy2(source, cbmc_target)
+
+
+def ensure_mutation_tool_layout(tool_root: Path) -> None:
+    required_dirs = [
+        tool_root / "CBMC",
+        tool_root / "MutationAnalysis",
+        tool_root / "SequenceGenerator",
+        tool_root / "Programs",
+        tool_root / "Programs" / "GCOV",
+    ]
+
+    fallback_roots = [
+        BASE_ROOT / "TRUSTINN" / "TRUSTINN" / "MUTATION_TESTING_PROFILER",
+        BASE_ROOT / "TRUSTINN" / "MUTATION_TESTING_PROFILER",
+    ]
+
+    for req in required_dirs:
+        if req.exists() and req.is_dir():
+            continue
+
+        copied = False
+        for fallback_root in fallback_roots:
+            source = fallback_root / req.relative_to(tool_root)
+            if source.exists() and source.is_dir():
+                if req.exists() and not req.is_dir():
+                    req.unlink(missing_ok=True)
+                shutil.copytree(source, req, dirs_exist_ok=True)
+                copied = True
+                break
+
+        if not copied:
+            _replace_with_directory(req)
+
+
+def stage_mutation_sample(tool_root: Path, sample_path: str) -> None:
+    source = Path(sample_path)
+    if not source.exists() or source.suffix.lower() != ".c":
+        return
+
+    # main-gProfiler.sh expects <benchmark>.c in tool root and also under Programs/GCOV.
+    root_target = tool_root / source.name
+    gcov_target = tool_root / "Programs" / "GCOV" / source.name
+    shutil.copy2(source, root_target)
+    shutil.copy2(source, gcov_target)
+
+
 def list_samples(language: str, tool: str) -> None:
     config = get_tool_config(language, tool)
     tool_root = resolve_tool_root(config)
@@ -126,7 +219,7 @@ def build_args(tool: str, sample_path: str, params: dict) -> list:
     if tool == "Mutation Testing Profiler":
         return [sample_path, str(params.get("gmutantVersion", "")), str(params.get("gmutantTimebound", ""))]
     if tool == "VeriSol":
-        return [sample_path, str(params.get("solidityMode", ""))]
+        return [Path(sample_path).name, str(params.get("solidityMode", ""))]
     return [sample_path]
 
 
@@ -177,6 +270,13 @@ def run_tool(language: str, tool: str, sample_path: str, params_json: str) -> in
     config = get_tool_config(language, tool)
     tool_root = resolve_tool_root(config)
     script_path = tool_root / config["script"]
+
+    if tool == "Advance Code Coverage Profiler":
+        ensure_advance_tool_layout(tool_root)
+        stage_advance_sample(tool_root, sample_path)
+    if tool == "Mutation Testing Profiler":
+        ensure_mutation_tool_layout(tool_root)
+        stage_mutation_sample(tool_root, sample_path)
 
     if not script_path.exists():
         raise RuntimeError(f"Script not found: {script_path}")
