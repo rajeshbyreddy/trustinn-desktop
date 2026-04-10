@@ -71,6 +71,13 @@ const STRICT_CLEAN_TOOLS = new Set(["DSE based Mutation Analyser"]);
 const DOCKER_IMAGE = process.env.TRUSTINN_DOCKER_IMAGE || "pasup/trustinn-tools:1.1.1";
 const USE_DOCKER_RUNTIME = process.env.TRUSTINN_USE_DOCKER !== "false";
 const CONTAINER_RESULTS_ROOT = "/results";
+const HOST_TRUSTINN_ROOT = process.env.TRUSTINN_HOST_ROOT || "/mnt/d/TRUSTINN";
+const CONTAINER_TRUSTINN_ROOT = "/mnt/d/TRUSTINN";
+const TOOLS_REQUIRING_TRACERX = new Set([
+  "Dynamic Symbolic Execution",
+  "Dynamic Symbolic Execution with Pruning",
+  "DSE based Mutation Analyser"
+]);
 
 function getToolConfig(language, tool) {
   const byLanguage = TOOL_CONFIG[language];
@@ -253,15 +260,20 @@ function getDockerArgs(extraArgs = []) {
   const outputRoot = getTrustinnDownloadsRoot();
   fs.mkdirSync(outputRoot, { recursive: true });
 
-  return [
+  const dockerArgs = [
     "run",
     "--rm",
     "-i",
     "-v",
-    `${outputRoot}:${CONTAINER_RESULTS_ROOT}`,
-    DOCKER_IMAGE,
-    ...extraArgs
+    `${outputRoot}:${CONTAINER_RESULTS_ROOT}`
   ];
+
+  if (fs.existsSync(HOST_TRUSTINN_ROOT)) {
+    dockerArgs.push("-v", `${HOST_TRUSTINN_ROOT}:${CONTAINER_TRUSTINN_ROOT}`);
+  }
+
+  dockerArgs.push(DOCKER_IMAGE, ...extraArgs);
+  return dockerArgs;
 }
 
 function remapContainerOutput(text) {
@@ -447,6 +459,12 @@ function relocateArtifacts(toolRoot, tool, samplePath, beforeSnapshot) {
 
 async function runTool(event, language, tool, samplePath, params) {
   if (USE_DOCKER_RUNTIME) {
+    if (TOOLS_REQUIRING_TRACERX.has(tool) && !fs.existsSync(HOST_TRUSTINN_ROOT)) {
+      const msg = `Required host folder not found: ${HOST_TRUSTINN_ROOT}. Please ensure D:\\TRUSTINN is mounted in WSL.`;
+      event?.sender?.send("tool-output", { type: "stderr", data: `Error: ${msg}` });
+      return { ok: false, code: 1, output: msg, outputDir: null, movedArtifacts: [] };
+    }
+
     const outputDir = getContainerOutputDir(tool, samplePath);
     const args = getDockerArgs([
       "run-tool",
