@@ -27,6 +27,20 @@ function Finish-Safely([string]$message) {
   exit 0
 }
 
+function Wait-DockerReady([int]$timeoutSeconds = 300) {
+  $elapsed = 0
+  while ($elapsed -lt $timeoutSeconds) {
+    try {
+      docker info | Out-Null
+      return $true
+    } catch {
+      Start-Sleep -Seconds 5
+      $elapsed += 5
+    }
+  }
+  return $false
+}
+
 $wslInstalled = $false
 try {
   wsl --status 2>$null | Out-Null
@@ -90,22 +104,71 @@ try {
 }
 
 if (-not $dockerInstalled) {
-  if (Ask-YesNo "Docker Desktop is required. Open download page now?") {
-    Start-Process "https://www.docker.com/products/docker-desktop/"
+  $wingetInstalled = $false
+  try {
+    winget --version | Out-Null
+    $wingetInstalled = $true
+  } catch {
+    $wingetInstalled = $false
   }
-  Finish-Safely "Docker is not installed yet."
+
+  if ($wingetInstalled) {
+    Write-Host "[Trustinn] Installing Docker Desktop via winget..."
+    try {
+      Start-Process -FilePath "winget.exe" -ArgumentList @(
+        "install",
+        "--id", "Docker.DockerDesktop",
+        "-e",
+        "--accept-package-agreements",
+        "--accept-source-agreements",
+        "--silent"
+      ) -Verb RunAs -Wait
+      $dockerInstalled = $true
+    } catch {
+      $dockerInstalled = $false
+    }
+  }
+
+  if (-not $dockerInstalled) {
+    if (Ask-YesNo "Docker Desktop is required. Automatic install failed. Open download page now?") {
+      Start-Process "https://www.docker.com/products/docker-desktop/"
+    }
+    Finish-Safely "Docker is not installed yet."
+  }
+}
+
+$dockerReady = $false
+try {
+  docker info | Out-Null
+  $dockerReady = $true
+} catch {
+  $dockerReady = $false
+}
+
+if (-not $dockerReady) {
+  Write-Host "[Trustinn] Starting Docker Desktop..."
+  try {
+    Start-Process -FilePath "$env:ProgramFiles\Docker\Docker\Docker Desktop.exe" | Out-Null
+  } catch {
+    # Ignore start failure here; readiness check below handles failure path.
+  }
+
+  if (-not (Wait-DockerReady 300)) {
+    Finish-Safely "Docker Desktop is installed but not ready. Start Docker Desktop, wait until running, then launch Trustinn again."
+  }
 }
 
 Write-Host "[Trustinn] Installing WSL dependencies..."
 $wslCmd = @(
-  "sudo apt-get update",
-  "sudo apt-get install -y python3-pip python3-tabulate python-is-python3 clang z3 cbmc g++ libtcmalloc-minimal4",
-  "sudo apt-get install -y jbmc || true",
+  "export DEBIAN_FRONTEND=noninteractive",
+  "apt-get update",
+  "apt-get install -y python3-pip python3-tabulate python-is-python3 clang z3 cbmc g++ libtcmalloc-minimal4 bc",
+  "apt-get install -y jbmc || true",
   "pip3 install --break-system-packages tabulate"
 ) -join " && "
 
 try {
-  wsl bash -lc $wslCmd
+  wsl -u root bash -lc $wslCmd
 } catch {
   Finish-Safely "Dependency install in WSL failed. Please retry after opening Ubuntu once manually."
 }
