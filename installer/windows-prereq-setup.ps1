@@ -112,9 +112,9 @@ try {
 
 Write-Host "[Trustinn] Pulling Trustinn Docker image..."
 try {
-  docker pull pasup/trustinn-tools:2.0.0
+  docker pull rajeshbyreddy95/trustinn-tools:2.0.1
 } catch {
-  Finish-Safely "Docker image pull failed. Please run 'docker pull pasup/trustinn-tools:2.0.0' manually."
+  Finish-Safely "Docker image pull failed. Please run 'docker pull rajeshbyreddy95/trustinn-tools:2.0.1' manually."
 }
 
 Finish-Safely "Prerequisites setup complete."
