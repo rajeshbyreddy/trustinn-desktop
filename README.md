@@ -16,6 +16,20 @@ bun dev
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
+## Run as Desktop App (Electron)
+
+Start Next.js and Electron together:
+
+```bash
+npm run electron-dev
+```
+
+This opens an Electron window and loads your Next.js app.
+
+- Electron main process: `electron/main.cjs`
+- Electron preload + IPC bridge: `electron/preload.cjs`
+- Renderer example IPC call: `app/page.tsx`
+
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.

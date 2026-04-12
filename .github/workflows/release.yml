@@ -1,0 +1,97 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        node-version: [18.x]
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Use Node.js ${{ matrix.node-version }}
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ matrix.node-version }}
+        cache: 'npm'
+
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Build Next.js
+      run: npm run build
+
+    - name: Build Electron app (Windows)
+      run: npm run electron-build:win:publish
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Get version from tag
+      id: get_version
+      run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+      if: startsWith(github.ref, 'refs/tags/')
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      if: startsWith(github.ref, 'refs/tags/')
+      with:
+        files: |
+          dist/**/*.exe
+          dist/**/*.exe.blockmap
+          dist/latest.yml
+        token: ${{ secrets.GITHUB_TOKEN }}
+        tag_name: ${{ env.VERSION || github.ref }}
+        generate_release_notes: true
+        draft: false
+        prerelease: false
+      env:
+        VERSION: ${{ steps.get_version.outputs.VERSION }}
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: trustinn-desktop-windows
+        path: dist/
+
+  version-tag:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Check if version changed
+      id: check_version
+      run: |
+        VERSION=$(cat package.json | grep '"version"' | head -1 | cut -d'"' -f4)
+        TAG="v$VERSION"
+        echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+        echo "TAG=$TAG" >> $GITHUB_OUTPUT
+        
+        # Check if tag exists
+        if git rev-parse "$TAG" >/dev/null 2>&1; then
+          echo "Tag already exists"
+          echo "TAG_EXISTS=true" >> $GITHUB_OUTPUT
+        else
+          echo "New tag needed"
+          echo "TAG_EXISTS=false" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Create git tag
+      if: steps.check_version.outputs.TAG_EXISTS == 'false'
+      run: |
+        git config user.name "GitHub Actions"
+        git config user.email "actions@github.com"
+        git tag ${{ steps.check_version.outputs.TAG }}
+        git push origin ${{ steps.check_version.outputs.TAG }}

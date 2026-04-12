@@ -1,0 +1,2104 @@
+"use client";
+
+import { Suspense, lazy, useMemo, useRef, useState, useEffect } from "react";
+import type { CSSProperties } from "react";
+import {
+  PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer,
+  BarChart, Bar, XAxis, YAxis, CartesianGrid,
+} from "recharts";
+import { FaChartLine, FaChartBar, FaSpinner, FaPython, FaJava } from "react-icons/fa";
+import { FaCode } from "react-icons/fa6";
+import { SiSolidity } from "react-icons/si";
+import { FiEye, FiDownload, FiCopy, FiSquare, FiBarChart2, FiX, FiStopCircle } from "react-icons/fi";
+import { Crown, Lock } from "lucide-react";
+import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
+import { oneLight } from "react-syntax-highlighter/dist/cjs/styles/prism";
+import Image from "next/image";
+import { SessionCheckModal } from "@/components/SessionInfoModal";
+
+const CodeEditor = lazy(() => import("@/components/CodeEditor"));
+
+type Tab = "c" | "java" | "python" | "solidity";
+type InputMode = "file" | "code";
+type ChartType = "pie" | "bar";
+
+type ChartDatum = { name: string; value: number; fill: string };
+type SampleOption = { name: string; path: string };
+
+const DSE_MUTATION_TOOL = "DSE based Mutation Analyser";
+const DYNAMIC_SYMBOLIC_TOOL = "Dynamic Symbolic Execution";
+const DSE_PRUNING_TOOL = "Dynamic Symbolic Execution with Pruning";
+const ADVANCED_COVERAGE_TOOL = "Advance Code Coverage Profiler";
+const MUTATION_TESTING_TOOL = "Mutation Testing Profiler";
+const JBMC_TOOL = "JBMC";
+const PYTHON_FUZZ_TOOL = "Condition Coverage Fuzzing";
+const VERISOL_TOOL = "VeriSol";
+const MUTATION_REPORT_START = "============Mutation Score Report============";
+const MUTATION_REPORT_END = "============Report-Finish====================";
+const TRUSTINN_BANNER = "This code is developed by NITMiner Technologies Pvt Ltd.";
+
+type MutationMetrics = {
+  alive: number;
+  killed: number;
+  reached: number;
+  dead: number;
+  total: number;
+  score: number;
+};
+
+type DynamicSymbolicMetrics = {
+  instrs: number;
+  timeSeconds: number;
+  icount: number;
+  icovPercent: number;
+  bcovPercent: number;
+  tsolverPercent: number;
+};
+
+type AdvancedCoverageMetrics = {
+  mcdcFeasible: number;
+  mcdcTotal: number;
+  mcdcScore: number;
+  scmccFeasible: number;
+  scmccTotal: number;
+  scmccScore: number;
+};
+
+type MutationTestingMetrics = {
+  killed: number;
+  total: number;
+  score: number;
+};
+
+type JbmcMetrics = {
+  failure: number;
+  added: number;
+  conditionalCoverage: number;
+};
+
+type PythonFuzzMetrics = {
+  violations: number;
+  uniqueCovered: number;
+  tracked: number;
+  failed: number;
+  unique: number;
+  passed: number;
+  total: number;
+  conditionalCoverage: number;
+};
+
+type VeriSolMetrics = {
+  inserted: number;
+  dynamicViolations: number;
+  uniqueViolations: number;
+  atomicConditions: number;
+  coverage: number;
+  runtimeSeconds: number;
+};
+
+function extractMutationReportBlock(output: string): string {
+  const raw = (output || "").replace(/\r\n/g, "\n").trim();
+  if (!raw) return "";
+
+  const start = raw.indexOf(MUTATION_REPORT_START);
+  if (start < 0) return "";
+
+  const end = raw.indexOf(MUTATION_REPORT_END, start);
+  if (end < 0) {
+    return raw.slice(start).trim();
+  }
+
+  return raw.slice(start, end + MUTATION_REPORT_END.length).trim();
+}
+
+function toMetricNumber(value: string | undefined): number {
+  if (!value) return 0;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function parseMutationMetrics(reportBlock: string): MutationMetrics | null {
+  if (!reportBlock) return null;
+
+  const alive = reportBlock.match(/Total number of Alive Mutants\s*=:\s*(\d+)/i)?.[1];
+  const killed = reportBlock.match(/Total number of Killed Mutants\s*=:\s*(\d+)/i)?.[1];
+  const reached = reportBlock.match(/Total number of Reached Mutants\s*=:\s*(\d+)/i)?.[1];
+  const dead = reportBlock.match(/Total number of Dead Mutants\s*=:\s*(\d+)/i)?.[1];
+  const total = reportBlock.match(/Total number of Total Mutants\s*=:\s*(\d+)/i)?.[1];
+  const score = reportBlock.match(/Mutation Score \(Killed\/Reached\)\s*=:\s*(\d+)%/i)?.[1];
+
+  if (!alive && !killed && !reached && !dead && !total && !score) {
+    return null;
+  }
+
+  return {
+    alive: toMetricNumber(alive),
+    killed: toMetricNumber(killed),
+    reached: toMetricNumber(reached),
+    dead: toMetricNumber(dead),
+    total: toMetricNumber(total),
+    score: toMetricNumber(score),
+  };
+}
+
+function mutationMetricsToChartData(metrics: MutationMetrics): ChartDatum[] {
+  return [
+    { name: "Alive", value: metrics.alive, fill: "#ef4444" },
+    { name: "Killed", value: metrics.killed, fill: "#10b981" },
+    { name: "Reached", value: metrics.reached, fill: "#3b82f6" },
+    { name: "Dead", value: metrics.dead, fill: "#f59e0b" },
+    { name: "Total", value: metrics.total, fill: "#8b5cf6" },
+  ];
+}
+
+function extractDynamicSymbolicSummary(output: string): string {
+  const raw = (output || "").replace(/\r\n/g, "\n").trim();
+  if (!raw) return "";
+
+  const banner = raw.includes(TRUSTINN_BANNER) ? TRUSTINN_BANNER : "";
+  const tableMatch = raw.match(/-+\n\|\s*Path\s*\|[^\n]*\n-+\n\|[^\n]+\n-+/m);
+  if (!tableMatch) {
+    return banner;
+  }
+
+  return [banner, tableMatch[0]].filter(Boolean).join("\n").trim();
+}
+
+function parseDynamicSymbolicMetrics(output: string): DynamicSymbolicMetrics | null {
+  const raw = (output || "").replace(/\r\n/g, "\n");
+  const rowMatch = raw.match(/\|[^\n]*klee-out-\d+[^\n]*\|/);
+  if (!rowMatch) return null;
+
+  const parts = rowMatch[0]
+    .split("|")
+    .map((p) => p.trim())
+    .filter(Boolean);
+
+  if (parts.length < 7) return null;
+
+  const instrs = Number.parseFloat(parts[1]);
+  const timeSeconds = Number.parseFloat(parts[2]);
+  const icovPercent = Number.parseFloat(parts[3]);
+  const bcovPercent = Number.parseFloat(parts[4]);
+  const icount = Number.parseFloat(parts[5]);
+  const tsolverPercent = Number.parseFloat(parts[6]);
+
+  if (
+    !Number.isFinite(instrs) ||
+    !Number.isFinite(timeSeconds) ||
+    !Number.isFinite(icount) ||
+    !Number.isFinite(icovPercent) ||
+    !Number.isFinite(bcovPercent) ||
+    !Number.isFinite(tsolverPercent)
+  ) {
+    return null;
+  }
+
+  return { instrs, timeSeconds, icount, icovPercent, bcovPercent, tsolverPercent };
+}
+
+function dynamicSymbolicMetricsToChartData(metrics: DynamicSymbolicMetrics): ChartDatum[] {
+  return [
+    { name: "Instrs", value: metrics.instrs, fill: "#3b82f6" },
+    { name: "Time (s)", value: Number(metrics.timeSeconds.toFixed(2)), fill: "#f59e0b" },
+    { name: "ICount", value: metrics.icount, fill: "#10b981" },
+  ];
+}
+
+function extractRegexBlock(output: string, regex: RegExp): string {
+  const raw = (output || "").replace(/\r\n/g, "\n");
+  return raw.match(regex)?.[0]?.trim() || "";
+}
+
+function extractDynamicSymbolicTable(output: string): string {
+  return extractRegexBlock(output, /-+\n\|\s*Path\s*\|[^\n]*\n-+\n\|[^\n]+\n-+/m);
+}
+
+function extractDsePruningSummary(output: string): string {
+  return extractDynamicSymbolicTable(output);
+}
+
+function extractAdvancedCoverageSummary(output: string): string {
+  const raw = (output || "").replace(/\r\n/g, "\n").trim();
+  if (!raw) return "";
+
+  const banner = raw.includes(TRUSTINN_BANNER) ? TRUSTINN_BANNER : "";
+  const mcdc = extractRegexBlock(raw, /============MC\/DC Report============[\s\S]*?============Report-Finish====================/m);
+  const scmcc = extractRegexBlock(raw, /============SC-MCC Report============[\s\S]*?============Report-Finish====================/m);
+  const doneSection = extractRegexBlock(raw, /Done\. Results.*(?:Results moved.*)?/m);
+
+  // If no reports found, return raw output for debugging
+  if (!mcdc && !scmcc) {
+    return raw;
+  }
+
+  return [banner, mcdc, scmcc, doneSection].filter(Boolean).join("\n").trim();
+}
+
+function extractMutationTestingSummary(output: string): string {
+  return extractRegexBlock(output, /============Mutation Report====================[\s\S]*?============Report-Finish====================/m);
+}
+
+function extractJbmcSummary(output: string): string {
+  return extractRegexBlock(output, /-+\nTotal Assertion Failure:\s*\d+[\s\S]*?Conditional Coverage:\s*\d+(?:\.\d+)?%/m);
+}
+
+function extractPythonFuzzSummary(output: string): string {
+  const summary = extractRegexBlock(output, /=== Assertion Summary ===[\s\S]*?Total tracked assertions:\s*\d+/m);
+  const totals = extractRegexBlock(output, /-+\nFailed Assertion:\s*\d+[\s\S]*?Conditional Coverage:\s*\d+(?:\.\d+)?%/m);
+  return [summary, totals].filter(Boolean).join("\n").trim();
+}
+
+function parseAdvancedCoverageMetrics(output: string): AdvancedCoverageMetrics | null {
+  const mcdcFeasible = output.match(/feasible MC\/DC sequences\s*=\s*(\d+)/i)?.[1];
+  const mcdcTotal = output.match(/Total no\. of MC\/DC sequences\s*=\s*(\d+)/i)?.[1];
+  const mcdcScore = output.match(/MC\/DC Score\s*=\s*(\d+)/i)?.[1];
+  const scmccFeasible = output.match(/feasible SC-MCC sequences\s*=\s*(\d+)/i)?.[1];
+  const scmccTotal = output.match(/Total no\. of SC-MCC sequences\s*=\s*(\d+)/i)?.[1];
+  const scmccScore = output.match(/SC-MCC Score\s*=\s*(\d+)/i)?.[1];
+
+  if (!mcdcFeasible && !mcdcTotal && !mcdcScore && !scmccFeasible && !scmccTotal && !scmccScore) {
+    return null;
+  }
+
+  return {
+    mcdcFeasible: toMetricNumber(mcdcFeasible),
+    mcdcTotal: toMetricNumber(mcdcTotal),
+    mcdcScore: toMetricNumber(mcdcScore),
+    scmccFeasible: toMetricNumber(scmccFeasible),
+    scmccTotal: toMetricNumber(scmccTotal),
+    scmccScore: toMetricNumber(scmccScore),
+  };
+}
+
+function advancedCoverageToChartData(metrics: AdvancedCoverageMetrics): ChartDatum[] {
+  return [
+    { name: "MC/DC Feasible", value: metrics.mcdcFeasible, fill: "#3b82f6" },
+    { name: "MC/DC Total", value: metrics.mcdcTotal, fill: "#10b981" },
+    { name: "SC-MCC Feasible", value: metrics.scmccFeasible, fill: "#f59e0b" },
+    { name: "SC-MCC Total", value: metrics.scmccTotal, fill: "#8b5cf6" },
+  ];
+}
+
+function parseMutationTestingMetrics(output: string): MutationTestingMetrics | null {
+  const killed = output.match(/Total no\.\s*of Killed Mutants\s*=\s*(\d+)/i)?.[1];
+  const total = output.match(/Total no\.\s*of Mutants\s*=\s*(\d+)/i)?.[1];
+  const score = output.match(/Mutation Score\s*=\s*(\d+)/i)?.[1];
+
+  if (!killed && !total && !score) return null;
+
+  return {
+    killed: toMetricNumber(killed),
+    total: toMetricNumber(total),
+    score: toMetricNumber(score),
+  };
+}
+
+function mutationTestingToChartData(metrics: MutationTestingMetrics): ChartDatum[] {
+  const alive = Math.max(0, metrics.total - metrics.killed);
+  return [
+    { name: "Killed", value: metrics.killed, fill: "#10b981" },
+    { name: "Alive", value: alive, fill: "#ef4444" },
+    { name: "Total", value: metrics.total, fill: "#3b82f6" },
+  ];
+}
+
+function parseJbmcMetrics(output: string): JbmcMetrics | null {
+  const failure = output.match(/Total Assertion Failure:\s*(\d+)/i)?.[1];
+  const added = output.match(/Total Assertion Added:\s*(\d+)/i)?.[1];
+  const conditionalCoverage = output.match(/Conditional Coverage:\s*(\d+(?:\.\d+)?)%/i)?.[1];
+
+  if (!failure && !added && !conditionalCoverage) return null;
+
+  return {
+    failure: toMetricNumber(failure),
+    added: toMetricNumber(added),
+    conditionalCoverage: Number.parseFloat(conditionalCoverage || "0") || 0,
+  };
+}
+
+function jbmcToChartData(metrics: JbmcMetrics): ChartDatum[] {
+  const success = Math.max(0, metrics.added - metrics.failure);
+  return [
+    { name: "Failure", value: metrics.failure, fill: "#ef4444" },
+    { name: "Success", value: success, fill: "#10b981" },
+    { name: "Total", value: metrics.added, fill: "#3b82f6" },
+  ];
+}
+
+function parsePythonFuzzMetrics(output: string): PythonFuzzMetrics | null {
+  const violations = output.match(/Total assertion violations:\s*(\d+)/i)?.[1];
+  const uniqueCovered = output.match(/Unique assertions covered:\s*(\d+)/i)?.[1];
+  const tracked = output.match(/Total tracked assertions:\s*(\d+)/i)?.[1];
+  const failed = output.match(/Failed Assertion:\s*(\d+)/i)?.[1];
+  const unique = output.match(/Unique Assertions\s*:\s*(\d+)/i)?.[1];
+  const passed = output.match(/Passed Assertions\s*:\s*(\d+)/i)?.[1];
+  const total = output.match(/Total Assertion\s*:\s*(\d+)/i)?.[1];
+  const conditionalCoverage = output.match(/Conditional Coverage:\s*(\d+(?:\.\d+)?)%/i)?.[1];
+
+  if (!violations && !tracked && !failed && !total && !conditionalCoverage) return null;
+
+  return {
+    violations: toMetricNumber(violations),
+    uniqueCovered: toMetricNumber(uniqueCovered),
+    tracked: toMetricNumber(tracked),
+    failed: toMetricNumber(failed),
+    unique: toMetricNumber(unique),
+    passed: toMetricNumber(passed),
+    total: toMetricNumber(total),
+    conditionalCoverage: Number.parseFloat(conditionalCoverage || "0") || 0,
+  };
+}
+
+function pythonFuzzToChartData(metrics: PythonFuzzMetrics): ChartDatum[] {
+  return [
+    { name: "Failed", value: metrics.failed || metrics.violations, fill: "#ef4444" },
+    { name: "Passed", value: metrics.passed, fill: "#10b981" },
+    { name: "Total", value: metrics.total || metrics.tracked, fill: "#3b82f6" },
+    { name: "Unique", value: metrics.unique || metrics.uniqueCovered, fill: "#f59e0b" },
+  ];
+}
+
+function parseVeriSolMetrics(output: string): VeriSolMetrics | null {
+  const inserted = output.match(/Properties inserted\s*:\s*(\d+)/i)?.[1];
+  const dynamicViolations = output.match(/Properties violation detected \(dynamic\)\s*:\s*(\d+)/i)?.[1];
+  const uniqueViolations = output.match(/Properties violation detected \(unique\)\s*:\s*(\d+)/i)?.[1];
+  const atomicConditions = output.match(/Total atomic condition\s*:\s*(\d+)/i)?.[1];
+  const coverage = output.match(/Condition Coverage %\s*:\s*(\d+(?:\.\d+)?)%/i)?.[1];
+  const runtimeSeconds = output.match(/Total runtime in seconds\s*:\s*(\d+(?:\.\d+)?)/i)?.[1];
+
+  if (!inserted && !dynamicViolations && !uniqueViolations && !atomicConditions && !coverage && !runtimeSeconds) {
+    return null;
+  }
+
+  return {
+    inserted: toMetricNumber(inserted),
+    dynamicViolations: toMetricNumber(dynamicViolations),
+    uniqueViolations: toMetricNumber(uniqueViolations),
+    atomicConditions: toMetricNumber(atomicConditions),
+    coverage: Number.parseFloat(coverage || "0") || 0,
+    runtimeSeconds: Number.parseFloat(runtimeSeconds || "0") || 0,
+  };
+}
+
+function veriSolToChartData(metrics: VeriSolMetrics): ChartDatum[] {
+  return [
+    { name: "Inserted", value: metrics.inserted, fill: "#3b82f6" },
+    { name: "Dynamic", value: metrics.dynamicViolations, fill: "#ef4444" },
+    { name: "Unique", value: metrics.uniqueViolations, fill: "#10b981" },
+    { name: "Atomic", value: metrics.atomicConditions, fill: "#f59e0b" },
+  ];
+}
+
+/* ─── Design tokens ─────────────────────────────────────────── */
+const TOKEN = {
+  bg: "#ffffff",
+  bgSurface: "#f8fafc",
+  bgDeep: "#f1f5f9",
+  border: "#e2e8f0",
+  borderMd: "#cbd5e1",
+  text: "#2795F5",
+  textSub: "#64748b",
+  textMuted: "#94a3b8",
+  accent: "#6366f1",
+  green: "#059669",
+  orange: "#ea580c",
+  red: "#dc2626",
+  termBg: "#020617",
+  termSurface: "#0f172a",
+  termBorder: "#1e293b",
+} as const;
+
+/* ─── Language metadata with icons ──────────────────────────── */
+const LANG_META: Record<Tab, {
+  label: string;
+  Icon: React.ComponentType<{ size?: number; style?: CSSProperties }>;
+  iconColor: string;
+}> = {
+  c:        { label: "C",        Icon: FaCode,     iconColor: "#3b82f6" },
+  java:     { label: "Java",     Icon: FaJava,     iconColor: "#f59e0b" },
+  python:   { label: "Python",   Icon: FaPython,   iconColor: "#22c55e" },
+  solidity: { label: "Solidity", Icon: SiSolidity, iconColor: "#8b5cf6" },
+};
+
+/* ─── Shared style helpers ───────────────────────────────────── */
+const S = {
+  card: {
+    background: TOKEN.bg,
+    border: `1px solid ${TOKEN.border}`,
+    borderRadius: 12,
+    padding: "12px 14px",
+  } as CSSProperties,
+
+  label: {
+    display: "block",
+    fontSize: 11,
+    fontWeight: 600,
+    color: TOKEN.textSub,
+    letterSpacing: "0.05em",
+    textTransform: "uppercase" as const,
+    marginBottom: 6,
+  } as CSSProperties,
+
+  select: {
+    width: "100%",
+    border: `1px solid ${TOKEN.borderMd}`,
+    borderRadius: 8,
+    padding: "7px 10px",
+    fontSize: 12,
+    color: TOKEN.text,
+    background: TOKEN.bg,
+    outline: "none",
+    cursor: "pointer",
+  } as CSSProperties,
+
+  btn: (bg: string, color = "#fff"): CSSProperties => ({
+    background: bg, color,
+    border: "none", borderRadius: 8,
+    padding: "8px 0", fontSize: 11.5, fontWeight: 600,
+    cursor: "pointer", display: "inline-flex",
+    alignItems: "center", justifyContent: "center",
+    gap: 5, transition: "opacity 0.15s",
+  }),
+
+  outlineBtn: {
+    background: TOKEN.bg, color: TOKEN.text,
+    borderRadius: 8, border: `1px solid ${TOKEN.border}`,
+    padding: "8px 0", fontSize: 11.5, fontWeight: 500,
+    cursor: "pointer", display: "inline-flex",
+    alignItems: "center", justifyContent: "center", gap: 5,
+  } as CSSProperties,
+
+  paramBox: {
+    background: "#eff6ff", border: "1px solid #bfdbfe",
+    borderRadius: 8, padding: "10px 12px", marginTop: 8,
+  } as CSSProperties,
+
+  paramLabel: {
+    fontSize: 11, color: "#1d4ed8",
+    fontWeight: 600, display: "block", marginBottom: 5,
+  } as CSSProperties,
+
+  termBtn: {
+    background: "transparent", border: "none",
+    color: "#6b7280", fontSize: 11, cursor: "pointer",
+    display: "flex", alignItems: "center", gap: 4,
+    padding: "3px 7px", borderRadius: 5,
+    fontFamily: "inherit", transition: "color 0.12s",
+    whiteSpace: "nowrap" as const,
+  } as CSSProperties,
+};
+
+/* ─── Analytics Drawer — 30% width, slides right→left ────────── */
+function AnalyticsDrawer({
+  open, onClose, chartData, chartType, setChartType, visualizationTitle, loading,
+  percentageItems,
+  onCopyPercentageItem,
+}: {
+  open: boolean; onClose: () => void;
+  chartData: ChartDatum[]; chartType: ChartType;
+  setChartType: (t: ChartType) => void;
+  visualizationTitle: string; loading: boolean;
+  percentageItems: string[];
+  onCopyPercentageItem: (item: string) => void;
+}) {
+  const hasData =
+    chartData.length > 0 &&
+    !(chartData.length === 1 && chartData[0]?.name === "✅ Execution Complete");
+
+  return (
+    <>
+      {/* Backdrop */}
+      <div
+        onClick={onClose}
+        style={{
+          position: "fixed", inset: 0, zIndex: 50,
+          background: "rgba(15,23,42,0.35)",
+          backdropFilter: "blur(3px)",
+          opacity: open ? 1 : 0,
+          pointerEvents: open ? "auto" : "none",
+          transition: "opacity 0.3s ease",
+        }}
+      />
+
+      {/* Drawer panel — exactly 30% */}
+      <div
+        style={{
+          position: "fixed", top: 0, right: 0, bottom: 0,
+          width: "30%",
+          minWidth: 300,
+          maxWidth: 460,
+          zIndex: 51,
+          background: TOKEN.bg,
+          borderLeft: `1px solid ${TOKEN.border}`,
+          boxShadow: "-8px 0 40px rgba(0,0,0,0.12)",
+          transform: open ? "translateX(0)" : "translateX(100%)",
+          transition: "transform 0.38s cubic-bezier(0.16,1,0.3,1)",
+          display: "flex", flexDirection: "column", overflow: "hidden",
+        }}
+      >
+        {/* Drawer header */}
+        <div
+          style={{
+            padding: "13px 16px",
+            borderBottom: `1px solid ${TOKEN.border}`,
+            display: "flex", alignItems: "center", justifyContent: "space-between",
+            flexShrink: 0, background: TOKEN.bgSurface,
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+            <div
+              style={{
+                width: 30, height: 30, borderRadius: 8,
+                background: TOKEN.accent,
+                display: "flex", alignItems: "center", justifyContent: "center",
+              }}
+            >
+              <FiBarChart2 size={15} color="#fff" />
+            </div>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: TOKEN.text }}>
+                {visualizationTitle || "Analytics"}
+              </div>
+              <div style={{ fontSize: 10.5, color: TOKEN.textMuted, marginTop: 1 }}>
+                Execution visualization
+              </div>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            style={{
+              width: 26, height: 26, borderRadius: 6,
+              background: TOKEN.bgDeep, border: `1px solid ${TOKEN.border}`,
+              color: TOKEN.textSub, cursor: "pointer",
+              display: "flex", alignItems: "center", justifyContent: "center",
+            }}
+          >
+            <FiX size={14} />
+          </button>
+        </div>
+
+        {/* Drawer body */}
+        <div
+          style={{
+            flex: 1, overflowY: "auto",
+            padding: "14px 16px",
+            display: "flex", flexDirection: "column", gap: 12,
+          }}
+        >
+          {!hasData ? (
+            <div
+              style={{
+                display: "flex", flexDirection: "column",
+                alignItems: "center", justifyContent: "center",
+                flex: 1, gap: 10, paddingTop: 60,
+              }}
+            >
+              <FiBarChart2 size={34} color={TOKEN.textMuted} />
+              <div style={{ fontSize: 13, fontWeight: 600, color: TOKEN.text }}>No data yet</div>
+              <div style={{ fontSize: 11.5, color: TOKEN.textMuted, textAlign: "center", lineHeight: 1.5 }}>
+                Execute a tool first, then view analytics here.
+              </div>
+            </div>
+          ) : (
+            <>
+              {/* Chart type toggle */}
+              <div
+                style={{
+                  display: "flex", gap: 3,
+                  background: TOKEN.bgDeep, borderRadius: 9,
+                  padding: 3, border: `1px solid ${TOKEN.border}`,
+                }}
+              >
+                {(["pie", "bar"] as ChartType[]).map((t) => (
+                  <button
+                    key={t}
+                    onClick={() => setChartType(t)}
+                    style={{
+                      flex: 1, padding: "6px 0", borderRadius: 7,
+                      background: chartType === t ? TOKEN.bg : "transparent",
+                      border: chartType === t ? `1px solid ${TOKEN.border}` : "1px solid transparent",
+                      color: chartType === t ? TOKEN.accent : TOKEN.textMuted,
+                      fontSize: 11.5, fontWeight: 600, cursor: "pointer",
+                      display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
+                      transition: "all 0.15s",
+                    }}
+                  >
+                    {t === "pie"
+                      ? <><FaChartLine size={11} /> Pie</>
+                      : <><FaChartBar size={11} /> Bar</>}
+                  </button>
+                ))}
+              </div>
+
+              {/* Chart */}
+              <div style={{ ...S.card, padding: "12px 8px" }}>
+                <div
+                  style={{
+                    fontSize: 9.5, fontWeight: 700, color: TOKEN.textSub,
+                    marginBottom: 8, letterSpacing: "0.07em", textTransform: "uppercase",
+                    display: "flex", alignItems: "center", gap: 5,
+                  }}
+                >
+                  <span style={{ width: 5, height: 5, borderRadius: "50%", background: TOKEN.accent, display: "inline-block" }} />
+                  {visualizationTitle || "Results"}
+                </div>
+                <div style={{ width: "100%", height: 240 }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    {chartType === "pie" ? (
+                      <PieChart>
+                        <Pie
+                          data={chartData} cx="50%" cy="50%"
+                          outerRadius={75} dataKey="value"
+                          label={({ name, value }) => `${name}: ${value}`}
+                          labelLine={{ stroke: "#d1d5db", strokeWidth: 1 }}
+                        >
+                          {chartData.map((entry, i) => (
+                            <Cell key={`${entry.name}-${i}`} fill={entry.fill} />
+                          ))}
+                        </Pie>
+                        <Tooltip contentStyle={{ background: TOKEN.bg, border: `1px solid ${TOKEN.border}`, borderRadius: 8, fontSize: 11 }} />
+                        <Legend iconType="circle" wrapperStyle={{ fontSize: 10.5, color: TOKEN.textSub }} />
+                      </PieChart>
+                    ) : (
+                      <BarChart data={chartData} barSize={16} margin={{ top: 10, right: 10, left: 10, bottom: 36 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke={TOKEN.bgDeep} />
+                        <XAxis dataKey="name" tick={{ fill: TOKEN.textSub, fontSize: 10 }} axisLine={{ stroke: TOKEN.borderMd }} tickLine={false} angle={-35} textAnchor="end" height={60} interval={0} />
+                        <YAxis tick={{ fill: TOKEN.textSub, fontSize: 10 }} axisLine={{ stroke: TOKEN.borderMd }} tickLine={false} width={36} />
+                        <Tooltip contentStyle={{ background: TOKEN.bg, border: `1px solid ${TOKEN.border}`, borderRadius: 8, fontSize: 11 }} />
+                        <Bar dataKey="value" radius={[4, 4, 0, 0]}>
+                          {chartData.map((entry, i) => (
+                            <Cell key={`${entry.name}-${i}`} fill={entry.fill} />
+                          ))}
+                        </Bar>
+                      </BarChart>
+                    )}
+                  </ResponsiveContainer>
+                </div>
+              </div>
+
+              {/* Stat cards */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 7 }}>
+                {chartData.map((d) => (
+                  <div
+                    key={d.name}
+                    style={{
+                      background: TOKEN.bgSurface, border: `1px solid ${TOKEN.border}`,
+                      borderRadius: 9, padding: "9px 11px",
+                      borderLeft: `3px solid ${d.fill}`,
+                    }}
+                  >
+                    <div style={{ fontSize: 10, color: TOKEN.textMuted, marginBottom: 3 }}>{d.name}</div>
+                    <div style={{ fontSize: 19, fontWeight: 700, color: TOKEN.text }}>{d.value}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Download */}
+              {percentageItems.length > 0 && (
+                <div style={{ display: "grid", gap: 6 }}>
+                  {percentageItems.map((item) => (
+                    <button
+                      key={item}
+                      onClick={() => onCopyPercentageItem(item)}
+                      style={{
+                        ...S.btn("#0891b2"),
+                        width: "100%", padding: "8px 10px",
+                        fontSize: 11.5,
+                        textAlign: "left",
+                        justifyContent: "flex-start",
+                        whiteSpace: "normal",
+                        lineHeight: 1.35,
+                      }}
+                      title={item}
+                    >
+                      {`CTC: ${item}`}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              <button
+                disabled={loading}
+                style={{
+                  ...S.btn(loading ? TOKEN.bgDeep : TOKEN.accent),
+                  color: loading ? TOKEN.textMuted : "#fff",
+                  width: "100%", padding: "9px 0",
+                  fontSize: 12, opacity: loading ? 0.7 : 1,
+                }}
+              >
+                {loading
+                  ? <><FaSpinner style={{ animation: "spin 1s linear infinite" }} size={12} /> Preparing…</>
+                  : <><FiDownload size={12} /> Download Chart</>}
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
+/* ─── Sample Picker Modal ────────────────────────────────────── */
+function SamplePickerModal({ open, title, samples, onClose, onSelect }: {
+  open: boolean; title: string; samples: SampleOption[];
+  onClose: () => void; onSelect: (s: SampleOption) => void;
+}) {
+  if (!open) return null;
+  return (
+    <div
+      style={{
+        position: "fixed", inset: 0, zIndex: 60,
+        background: "rgba(2,6,23,0.5)",
+        display: "flex", alignItems: "center", justifyContent: "center", padding: 16,
+      }}
+      onClick={onClose}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: "min(600px, 95vw)", maxHeight: "76vh",
+          background: TOKEN.bg, borderRadius: 14,
+          border: `1px solid ${TOKEN.border}`,
+          boxShadow: "0 24px 60px rgba(15,23,42,0.2)",
+          overflow: "hidden", display: "flex", flexDirection: "column",
+        }}
+      >
+        <div
+          style={{
+            padding: "12px 16px", borderBottom: `1px solid ${TOKEN.border}`,
+            fontSize: 13, fontWeight: 700, color: TOKEN.text,
+            display: "flex", justifyContent: "space-between", alignItems: "center",
+          }}
+        >
+          {title}
+          <button
+            onClick={onClose}
+            style={{
+              width: 27, height: 27, borderRadius: 6,
+              background: TOKEN.bgDeep, border: `1px solid ${TOKEN.border}`,
+              color: TOKEN.textSub, cursor: "pointer",
+              display: "flex", alignItems: "center", justifyContent: "center",
+            }}
+          >
+            <FiX size={14} />
+          </button>
+        </div>
+        <div style={{ padding: 10, overflowY: "auto" }}>
+          {samples.length === 0 ? (
+            <div style={{ fontSize: 12, color: TOKEN.textMuted, padding: "8px 4px" }}>No samples available.</div>
+          ) : (
+            samples.map((s) => (
+              <button
+                key={s.path}
+                onClick={() => onSelect(s)}
+                style={{
+                  width: "100%", textAlign: "left", marginBottom: 6,
+                  border: `1px solid ${TOKEN.border}`, borderRadius: 8,
+                  background: TOKEN.bgSurface, padding: "9px 12px",
+                  cursor: "pointer", fontSize: 12, color: TOKEN.text,
+                }}
+              >
+                {s.name}
+              </button>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─── Main Component ─────────────────────────────────────────── */
+export default function ToolsContent() {
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [userData, setUserData] = useState<any>(null);
+  const [showSessionModal, setShowSessionModal] = useState(false);
+  
+  const [currentTab, setCurrentTab] = useState<Tab>("c");
+  const [inputMode, setInputMode] = useState<InputMode>("file");
+  const [cTool, setCTool] = useState("");
+  const [javaTool, setJavaTool] = useState("");
+  const [pythonTool, setPythonTool] = useState("");
+  const [solidityTool, setSolidityTool] = useState("");
+  const [cbmcBound, setCbmcBound] = useState("5");
+  const [kleemaValue, setKleemaValue] = useState("1");
+  const [gmcovVersion, setGmcovVersion] = useState("4");
+  const [gmutantVersion, setGmutantVersion] = useState("4");
+  const [gmcovTimebound, setGmcovTimebound] = useState("1200");
+  const [gmutantTimebound, setGmutantTimebound] = useState("60");
+  const [solidityMode, setSolidityMode] = useState("bmc");
+  const [sampleOptions, setSampleOptions] = useState<Record<Tab, SampleOption[]>>({
+    c: [], java: [], python: [], solidity: [],
+  });
+  const [selectedSamplePath, setSelectedSamplePath] = useState<Record<Tab, string>>({
+    c: "", java: "", python: "", solidity: "",
+  });
+  const [selectedLocalFilePath, setSelectedLocalFilePath] = useState<Record<Tab, string>>({
+    c: "", java: "", python: "", solidity: "",
+  });
+  const [isLoadingSamples, setIsLoadingSamples] = useState(false);
+  const [sampleModalOpen, setSampleModalOpen] = useState(false);
+  const [fileViewerOpen, setFileViewerOpen] = useState(false);
+  const [fileViewerContent, setFileViewerContent] = useState("");
+  const [fileViewerLanguage, setFileViewerLanguage] = useState<Tab>("c");
+  const [tempFilePaths, setTempFilePaths] = useState<Record<Tab, string>>({
+    c: "", java: "", python: "", solidity: "",
+  });
+  const [userCode, setUserCode] = useState<Record<Tab, string>>({
+    c: '#include <stdio.h>\n\nint main() {\n    printf("Hello, World!\\n");\n    return 0;\n}',
+    java: 'public class program {\n    public static void main(String[] args) {\n        System.out.println("Hello, World!");\n    }\n}',
+    python: 'print("Hello, World!")',
+    solidity: '// SPDX-License-Identifier: MIT\npragma solidity ^0.8.0;\n\ncontract HelloWorld {\n    function greet() public pure returns (string memory) {\n        return "Hello, World!";\n    }\n}',
+  });
+  const [terminalOutputs, setTerminalOutputs] = useState<Record<Tab, string>>({
+    c: "", java: "", python: "", solidity: "",
+  });
+  const [loading, setLoading] = useState(false);
+  const [isCompiling, setIsCompiling] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [chartData, setChartData] = useState<ChartDatum[]>([]);
+  const [chartType, setChartType] = useState<ChartType>("pie");
+  const [visualizationTitle, setVisualizationTitle] = useState("Execution Metrics");
+  const [percentageItems, setPercentageItems] = useState<string[]>([]);
+  const terminalRef = useRef<HTMLDivElement>(null);
+  const timerIdsRef = useRef<number[]>([]);
+
+  // ── Auth check on mount ──────────────────────────────────
+  useEffect(() => {
+    const checkAuth = async () => {
+      if (typeof window === "undefined") {
+        setAuthLoading(false);
+        return;
+      }
+
+      try {
+        // Check if session exists in sessionStorage (from NoAccessError login)
+        const token = sessionStorage.getItem("trustinn_token");
+        const userId = sessionStorage.getItem("trustinn_user_id");
+        const userStr = sessionStorage.getItem("trustinn_user");
+
+        if (!token || !userId) {
+          console.log("[ToolsContent] No session found");
+          setIsAuthenticated(false);
+          setAuthLoading(false);
+          return;
+        }
+
+        // Check if token is expired
+        const expiryStr = sessionStorage.getItem("token_expires");
+        if (expiryStr) {
+          const expiryTime = new Date(expiryStr).getTime();
+          if (expiryTime <= Date.now()) {
+            console.log("[ToolsContent] Token expired");
+            sessionStorage.removeItem("trustinn_token");
+            sessionStorage.removeItem("trustinn_user_id");
+            sessionStorage.removeItem("token_expires");
+            sessionStorage.removeItem("trustinn_user");
+            setIsAuthenticated(false);
+            setAuthLoading(false);
+            return;
+          }
+        }
+
+        // Parse and store user data
+        if (userStr) {
+          try {
+            const parsedUser = JSON.parse(userStr);
+            setUserData(parsedUser);
+          } catch (e) {
+            console.error("[ToolsContent] Failed to parse user data:", e);
+          }
+        }
+
+        // Token exists and is valid
+        console.log("[ToolsContent] Session valid");
+        setIsAuthenticated(true);
+      } catch (error) {
+        console.error("[ToolsContent] Auth check error:", error);
+        setIsAuthenticated(false);
+      } finally {
+        setAuthLoading(false);
+      }
+    };
+
+    void checkAuth();
+  }, []);
+
+  const getFileName = (v: string) =>
+    v ? v.replace(/\\\\/g, "/").split("/").pop() || v : "";
+
+  const currentTool = useMemo(() => {
+    if (currentTab === "c") return cTool;
+    if (currentTab === "java") return javaTool;
+    if (currentTab === "python") return pythonTool;
+    return solidityTool;
+  }, [currentTab, cTool, javaTool, pythonTool, solidityTool]);
+
+  const cParams = useMemo(() => {
+    switch (cTool) {
+      case "Condition Satisfiability Analysis": return `{cbmcBound:${cbmcBound || "10"}}`;
+      case "DSE based Mutation Analyser": return `{kleemaValue:${kleemaValue || "3"}}`;
+      case "Advance Code Coverage Profiler": return `{gmcovVersion:${gmcovVersion || "4"},gmcovTimebound:${gmcovTimebound || "60"}}`;
+      case "Mutation Testing Profiler": return `{gmutantVersion:${gmutantVersion || "4"},gmutantTimebound:${gmutantTimebound || "60"}}`;
+      default: return "{}";
+    }
+  }, [cTool, cbmcBound, kleemaValue, gmcovVersion, gmcovTimebound, gmutantVersion, gmutantTimebound]);
+
+  const solidityParams = useMemo(() => `{solidityMode:${solidityMode || "bmc"}}`, [solidityMode]);
+
+  const mockAppendOutput = (tab: Tab, msg: string) => {
+    setTerminalOutputs((prev) => ({ ...prev, [tab]: prev[tab] + msg + "\n" }));
+    setTimeout(() => {
+      if (terminalRef.current) terminalRef.current.scrollTop = terminalRef.current.scrollHeight;
+    }, 16);
+  };
+
+  const stopExecution = async (reason?: string) => {
+    timerIdsRef.current.forEach(clearTimeout);
+    timerIdsRef.current = [];
+    if (window.electronAPI?.stopRun) {
+      try { await window.electronAPI.stopRun(); } catch { /* ignore */ }
+    }
+    if ((loading || isCompiling) && reason) mockAppendOutput(currentTab, `🛑 ${reason}`);
+    setLoading(false);
+    setIsCompiling(false);
+    setPercentageItems([]);
+  };
+
+  const switchTab = (tabId: Tab) => {
+    void stopExecution("Language switched");
+    setTerminalOutputs({ c: "", java: "", python: "", solidity: "" });
+    setChartData([]);
+    setPercentageItems([]);
+    setInputMode("file");
+    setCurrentTab(tabId);
+    setSampleModalOpen(false);
+  };
+
+  const handleToolChange = (value: string) => {
+    void stopExecution("Tool switched");
+    setTerminalOutputs({ c: "", java: "", python: "", solidity: "" });
+    setChartData([]);
+    setPercentageItems([]);
+    if (currentTab === "c") setCTool(value);
+    else if (currentTab === "java") setJavaTool(value);
+    else if (currentTab === "python") setPythonTool(value);
+    else setSolidityTool(value);
+    setSelectedLocalFilePath((prev) => ({ ...prev, [currentTab]: "" }));
+    setSelectedSamplePath((prev) => ({ ...prev, [currentTab]: "" }));
+  };
+
+  const simulateRunOutput = (tab: Tab, code: string) => {
+    if (tab === "java") {
+      const cn = code.match(/class\s+([A-Za-z_]\w*)/)?.[1] || "Main";
+      return [`[Run] java ${cn}`, "Hello, World!"];
+    }
+    if (tab === "python") return ["[Run] python program.py", "Hello, World!"];
+    if (tab === "c") return ["[Run] ./a.out", "Hello, World!"];
+    return ["[Run] solidity execution simulation", "Execution completed"];
+  };
+
+  const loadSamplesForTool = async () => {
+    setTerminalOutputs((prev) => ({ ...prev, [currentTab]: "" }));
+
+    if (!currentTool) {
+      mockAppendOutput(currentTab, `❌ Select a ${currentTab.toUpperCase()} tool first.`);
+      return;
+    }
+    setIsLoadingSamples(true);
+    mockAppendOutput(currentTab, `[EXEC] Loading samples for ${currentTool}...`);
+    if (!window.electronAPI?.listSamples) {
+      setSampleOptions((prev) => ({ ...prev, [currentTab]: [] }));
+      setIsLoadingSamples(false);
+      return;
+    }
+    let result;
+    try {
+      result = await window.electronAPI.listSamples({ language: currentTab, tool: currentTool });
+    } catch (error) {
+      setIsLoadingSamples(false);
+      mockAppendOutput(currentTab, `❌ Failed: ${error instanceof Error ? error.message : "Unknown"}`);
+      return;
+    }
+    setIsLoadingSamples(false);
+    if (!result.ok) { mockAppendOutput(currentTab, `❌ ${result.error || "Unknown error"}`); return; }
+    const options = (result.samples || []).map((s: { name?: string; path: string }) => ({
+      name: s.name || getFileName(s.path), path: s.path,
+    }));
+    setSampleOptions((prev) => ({ ...prev, [currentTab]: options }));
+    setSelectedLocalFilePath((prev) => ({ ...prev, [currentTab]: "" }));
+    setSelectedSamplePath((prev) => ({ ...prev, [currentTab]: options[0]?.path || "" }));
+    setSampleModalOpen(true);
+    mockAppendOutput(currentTab, `✅ Loaded ${options.length} sample(s).`);
+  };
+
+  const browseLocalFile = async () => {
+    if (!window.electronAPI?.pickFile) return;
+    const result = await window.electronAPI.pickFile();
+    if (!result.ok || !("path" in result)) return;
+    setSelectedLocalFilePath((prev) => ({ ...prev, [currentTab]: result.path }));
+    setSelectedSamplePath((prev) => ({ ...prev, [currentTab]: "" }));
+    mockAppendOutput(currentTab, `✅ Selected: ${getFileName(result.path)}`);
+  };
+
+  const executeCommand = async (type: Tab) => {
+    // Strict auth check - no tool execution without valid session
+    if (!isAuthenticated) {
+      mockAppendOutput(type, "❌ Session expired. Please login again.");
+      setAuthLoading(true);
+      setIsAuthenticated(false);
+      return;
+    }
+
+    // Validate session token still exists in sessionStorage
+    const token = sessionStorage.getItem("trustinn_token");
+    if (!token) {
+      mockAppendOutput(type, "❌ No valid session. Please login again.");
+      setAuthLoading(true);
+      setIsAuthenticated(false);
+      return;
+    }
+
+    // Check if token is expired
+    const expiryStr = sessionStorage.getItem("token_expires");
+    if (expiryStr) {
+      const expiryTime = new Date(expiryStr).getTime();
+      if (expiryTime <= Date.now()) {
+        mockAppendOutput(type, "❌ Session expired. Please login again.");
+        sessionStorage.removeItem("trustinn_token");
+        sessionStorage.removeItem("trustinn_user_id");
+        sessionStorage.removeItem("token_expires");
+        sessionStorage.removeItem("trustinn_user");
+        setIsAuthenticated(false);
+        return;
+      }
+    }
+
+    setTerminalOutputs((prev) => ({ ...prev, [type]: "" }));
+
+    // Check tool selection
+    if (!currentTool) { mockAppendOutput(type, "❌ Select a security tool first."); return; }
+
+    const compactTools = new Set([
+      DSE_MUTATION_TOOL,
+      DYNAMIC_SYMBOLIC_TOOL,
+      DSE_PRUNING_TOOL,
+      ADVANCED_COVERAGE_TOOL,
+      MUTATION_TESTING_TOOL,
+      JBMC_TOOL,
+      PYTHON_FUZZ_TOOL,
+    ]);
+    const compactTerminalOutput = compactTools.has(currentTool);
+    setLoading(true);
+
+    // Handle both file mode and code mode
+    let sourceType: "sample" | "file" = "file";
+    let sourcePath: string | undefined;
+
+    if (inputMode === "code") {
+      // Code mode - get written code
+      const code = userCode[type];
+      if (!code || !code.trim()) {
+        mockAppendOutput(type, "❌ No code to analyze. Write or paste code first.");
+        setLoading(false);
+        return;
+      }
+      // Create a temp file with the code - use electron API to create temp file
+      if (!window.electronAPI?.writeTempFile) {
+        mockAppendOutput(type, "❌ Temp file creation not available.");
+        setLoading(false);
+        return;
+      }
+      try {
+        sourcePath = await window.electronAPI.writeTempFile(code, type);
+        // Track temp file path for cleanup
+        setTempFilePaths((prev) => ({ ...prev, [type]: sourcePath }));
+      } catch (error) {
+        mockAppendOutput(type, `❌ Failed to create temp file: ${error instanceof Error ? error.message : "Unknown error"}`);
+        setLoading(false);
+        return;
+      }
+    } else {
+      // File mode
+      const localPath = selectedLocalFilePath[type];
+      const samplePath = selectedSamplePath[type];
+      sourceType = localPath ? "file" : "sample";
+      sourcePath = localPath || samplePath;
+
+      if (!sourcePath) {
+        mockAppendOutput(type, "❌ Pick a sample or browse a file first.");
+        setLoading(false);
+        return;
+      }
+
+      // Validate local file extension matches language
+      if (localPath) {
+        const fileExt = localPath.split('.').pop()?.toLowerCase();
+        const expectedExtensions: Record<Tab, string> = {
+          c: 'c',
+          java: 'java',
+          python: 'py',
+          solidity: 'sol',
+        };
+        const expectedExt = expectedExtensions[type];
+
+        if (fileExt !== expectedExt) {
+          mockAppendOutput(type, `❌ Invalid file type. For ${type.toUpperCase()}, only .${expectedExt} files are allowed.`);
+          setLoading(false);
+          return;
+        }
+      }
+    }
+
+    const params = type === "c" ? cParams : type === "solidity" ? solidityParams : "{}";
+
+    if (!compactTerminalOutput) {
+      mockAppendOutput(type, `[EXEC] Running ${currentTool}...`);
+    } else {
+      // Even for compact tools, show that we're starting
+      mockAppendOutput(type, `[EXEC] Analyzing ${type.toUpperCase()} code...`);
+    }
+    if (!window.electronAPI?.runTool) { setLoading(false); return; }
+
+    let result;
+    try {
+      result = await window.electronAPI.runTool({
+        language: type,
+        tool: currentTool,
+        sourceType,
+        samplePath: sourceType === "sample" ? sourcePath : undefined,
+        filePath: sourceType === "file" ? sourcePath : undefined,
+        params,
+      });
+    } catch (error) {
+      mockAppendOutput(type, `❌ ${error instanceof Error ? error.message : "Unknown"}`);
+      setLoading(false);
+      return;
+    }
+
+    if (!result.output || result.output.trim().length === 0) {
+      mockAppendOutput(type, `[Tool Result] Status: ${result.ok ? "OK" : "FAILED"}, Message: ${result.error || "No output"}`);
+    }
+
+    const rawOutput = result.output || "";
+    let displayOutput = rawOutput.trim();
+    let nextChartData: ChartDatum[] = [];
+    let nextTitle = `${type.toUpperCase()} Execution Summary`;
+    let nextPercentageItems: string[] = [];
+
+    // Log ACCP output for debugging
+    if (currentTool === ADVANCED_COVERAGE_TOOL) {
+      console.log(`[ACCP-UI] Raw output length: ${rawOutput.length}`);
+      console.log(`[ACCP-UI] Has SC-MCC: ${rawOutput.includes("SC-MCC")}`);
+      console.log(`[ACCP-UI] Output first 200 chars: ${rawOutput.substring(0, 200)}`);
+      console.log(`[ACCP-UI] Output last 200 chars: ${rawOutput.substring(Math.max(0, rawOutput.length - 200))}`);
+    }
+
+    if (currentTool === DSE_MUTATION_TOOL) {
+      displayOutput = extractMutationReportBlock(rawOutput);
+      const metrics = parseMutationMetrics(displayOutput);
+      nextTitle = "Mutation Score Analytics";
+      if (metrics) {
+        nextChartData = mutationMetricsToChartData(metrics);
+        nextPercentageItems = [`Mutation Score (Killed/Reached): ${metrics.score}%`];
+      }
+    } else if (currentTool === DYNAMIC_SYMBOLIC_TOOL) {
+      displayOutput = extractDynamicSymbolicSummary(rawOutput);
+      const metrics = parseDynamicSymbolicMetrics(rawOutput);
+      nextTitle = "Dynamic Symbolic Execution Analytics";
+      if (metrics) {
+        nextChartData = dynamicSymbolicMetricsToChartData(metrics);
+        nextPercentageItems = [
+          `ICov: ${metrics.icovPercent}%`,
+          `BCov: ${metrics.bcovPercent}%`,
+          `TSolver: ${metrics.tsolverPercent}%`,
+        ];
+      }
+    } else if (currentTool === DSE_PRUNING_TOOL) {
+        displayOutput = extractDsePruningSummary(rawOutput);
+        const metrics = parseDynamicSymbolicMetrics(rawOutput);
+        nextTitle = "DSE with Pruning Analytics";
+        if (metrics) {
+          nextChartData = dynamicSymbolicMetricsToChartData(metrics);
+          nextPercentageItems = [
+            `ICov: ${metrics.icovPercent}%`,
+            `BCov: ${metrics.bcovPercent}%`,
+            `TSolver: ${metrics.tsolverPercent}%`,
+          ];
+        }
+      } else if (currentTool === ADVANCED_COVERAGE_TOOL) {
+        displayOutput = extractAdvancedCoverageSummary(rawOutput);
+        const metrics = parseAdvancedCoverageMetrics(displayOutput);
+        nextTitle = "Advanced Coverage Analytics";
+        if (metrics) {
+          nextChartData = advancedCoverageToChartData(metrics);
+          nextPercentageItems = [
+            `MC/DC Score: ${metrics.mcdcScore}`,
+            `SC-MCC Score: ${metrics.scmccScore}`,
+          ];
+        }
+      } else if (currentTool === MUTATION_TESTING_TOOL) {
+        displayOutput = extractMutationTestingSummary(rawOutput);
+        const metrics = parseMutationTestingMetrics(displayOutput);
+        nextTitle = "Mutation Testing Analytics";
+        if (metrics) {
+          nextChartData = mutationTestingToChartData(metrics);
+          nextPercentageItems = [`Mutation Score: ${metrics.score}`];
+        }
+      } else if (currentTool === JBMC_TOOL) {
+        displayOutput = extractJbmcSummary(rawOutput);
+        const metrics = parseJbmcMetrics(displayOutput);
+        nextTitle = "JBMC Assertion Analytics";
+        if (metrics) {
+          nextChartData = jbmcToChartData(metrics);
+          nextPercentageItems = [`Conditional Coverage: ${metrics.conditionalCoverage}%`];
+        }
+      } else if (currentTool === PYTHON_FUZZ_TOOL) {
+        displayOutput = extractPythonFuzzSummary(rawOutput);
+        const metrics = parsePythonFuzzMetrics(displayOutput);
+        nextTitle = "Condition Coverage Fuzzing Analytics";
+        if (metrics) {
+          nextChartData = pythonFuzzToChartData(metrics);
+          nextPercentageItems = [`Conditional Coverage: ${metrics.conditionalCoverage}%`];
+        }
+      } else if (currentTool === VERISOL_TOOL) {
+        const metrics = parseVeriSolMetrics(rawOutput);
+        nextTitle = "VeriSol Analytics";
+        if (metrics) {
+          nextChartData = veriSolToChartData(metrics);
+          nextPercentageItems = [`Condition Coverage: ${metrics.coverage}%`];
+        }
+      }
+
+      if (displayOutput) {
+        displayOutput.split("\n").forEach((l: string) => { if (l.trim()) mockAppendOutput(type, l); });
+      } else if (rawOutput && rawOutput.trim()) {
+        // If extraction didn't work, show raw output
+        mockAppendOutput(type, "[Raw Output]");
+        rawOutput.split("\n").forEach((l: string) => { if (l.trim()) mockAppendOutput(type, l); });
+      }
+
+      setChartData(nextChartData);
+      setVisualizationTitle(nextTitle);
+      setPercentageItems(nextPercentageItems);
+
+      // Show output first, then status
+      if (result.output) {
+        // Has output - execution happened
+        if (!compactTerminalOutput) {
+          mockAppendOutput(type, "✅ Execution completed.");
+        }
+      } else if (!result.ok) {
+        // No output and not ok - actual failure
+        mockAppendOutput(type, `❌ Failed${result.error ? `: ${result.error}` : ""}`);
+      }
+      
+      // Clean up temp file if it was created
+      const tempFilePath = tempFilePaths[type];
+      if (tempFilePath && inputMode === "code") {
+        try {
+          await window.electronAPI?.deleteTempFile(tempFilePath);
+          setTempFilePaths((prev) => ({ ...prev, [type]: "" }));
+        } catch (error) {
+          // Silently fail if cleanup doesn't work
+          console.warn("Failed to clean up temp file:", error);
+        }
+      }
+      
+      setLoading(false);
+  };
+
+  const compileCode = async (type: Tab) => {
+    // Auth check
+    if (!isAuthenticated) {
+      mockAppendOutput(type, "❌ Session expired. Please login again.");
+      return;
+    }
+
+    // Check if token is still valid
+    const token = sessionStorage.getItem("trustinn_token");
+    if (!token) {
+      mockAppendOutput(type, "❌ Session expired. Please login again.");
+      setIsAuthenticated(false);
+      return;
+    }
+
+    setTerminalOutputs((prev) => ({ ...prev, [type]: "" }));
+    setIsCompiling(true);
+
+    // Get code source based on input mode
+    let code: string = "";
+
+    if (inputMode === "code") {
+      code = userCode[type];
+      if (!code || !code.trim()) {
+        mockAppendOutput(type, "❌ No code to compile/execute. Write or paste code first.");
+        setIsCompiling(false);
+        return;
+      }
+    } else {
+      // File mode - only allow local uploaded files
+      const localPath = selectedLocalFilePath[type];
+      const samplePath = selectedSamplePath[type];
+      
+      if (samplePath && !localPath) {
+        // Sample files are in Docker container - can only be accessed via Execute
+        mockAppendOutput(type, "📁 Sample files can only be used with Execute button (security tools). To compile and test, use the Code tab or upload a local file.");
+        setIsCompiling(false);
+        return;
+      }
+
+      if (!localPath) {
+        mockAppendOutput(type, "❌ No file selected. Please select a file first.");
+        setIsCompiling(false);
+        return;
+      }
+
+      // Validate file extension matches language
+      const fileExt = localPath.split('.').pop()?.toLowerCase();
+      const expectedExtensions: Record<Tab, string> = {
+        c: 'c',
+        java: 'java',
+        python: 'py',
+        solidity: 'sol',
+      };
+      const expectedExt = expectedExtensions[type];
+
+      if (fileExt !== expectedExt) {
+        mockAppendOutput(type, `❌ Invalid file type. For ${type.toUpperCase()}, only .${expectedExt} files are allowed.`);
+        setIsCompiling(false);
+        return;
+      }
+
+      if (!window.electronAPI?.readFile) {
+        mockAppendOutput(type, "❌ File read not available.");
+        setIsCompiling(false);
+        return;
+      }
+
+      try {
+        code = await window.electronAPI.readFile(localPath);
+        if (!code || !code.trim()) {
+          mockAppendOutput(type, "❌ File is empty.");
+          setIsCompiling(false);
+          return;
+        }
+      } catch (error) {
+        mockAppendOutput(type, `❌ Failed to read file: ${error instanceof Error ? error.message : "Unknown error"}`);
+        setIsCompiling(false);
+        return;
+      }
+    }
+
+    mockAppendOutput(type, `[Compilation] Compiling ${type.toUpperCase()} code...`);
+
+    try {
+      const response = await fetch("/api/code-execute", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          language: type,
+          code: code,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        mockAppendOutput(type, `❌ Error: ${data.error || "Unknown error"}`);
+        setIsCompiling(false);
+        return;
+      }
+
+      mockAppendOutput(type, `[Execution] Output:`);
+      mockAppendOutput(type, data.output);
+      mockAppendOutput(type, `✅ Execution completed successfully.`);
+    } catch (error) {
+      mockAppendOutput(type, `❌ ${error instanceof Error ? error.message : "Unknown error"}`);
+    } finally {
+      setIsCompiling(false);
+    }
+  };
+
+  const copyToClipboard = () => {
+    navigator.clipboard.writeText(terminalOutputs[currentTab] || "").catch(() => {});
+  };
+
+  const copyPercentageItem = (item: string) => {
+    if (!item) return;
+    navigator.clipboard.writeText(item).catch(() => {});
+  };
+
+  const terminalLines = (terminalOutputs[currentTab] || "").split("\n");
+
+  const getLineStyle = (line: string): CSSProperties => {
+    if (line.startsWith("❌") || line.includes("Error"))
+      return { color: "#fca5a5", background: "rgba(248,113,113,0.07)" };
+    if (line.startsWith("✅"))
+      return { color: "#86efac", background: "rgba(34,197,94,0.06)" };
+    if (line.startsWith("[EXEC]") || line.startsWith("[Run]") || line.startsWith("[Compilation]") || line.startsWith("[Execution]"))
+      return { color: "#93c5fd", background: "rgba(59,130,246,0.07)" };
+    if (line.startsWith("🛑"))
+      return { color: "#fcd34d", background: "rgba(250,204,21,0.06)" };
+    if (line.startsWith("ℹ"))
+      return { color: "#a5b4fc", background: "transparent" };
+    return { color: "#d1d5db", background: "transparent" };
+  };
+
+  /* ── Shared action buttons ── */
+  const ActionButtons = () => (
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
+      <button
+        onClick={() => executeCommand(currentTab)}
+        disabled={loading}
+        style={{ ...S.btn(TOKEN.green), opacity: loading ? 0.75 : 1 }}
+      >
+        {loading
+          ? <><FaSpinner style={{ animation: "spin 1s linear infinite" }} size={12} /> Running…</>
+          : "▶ Execute"}
+      </button>
+      <button
+        onClick={() => compileCode(currentTab)}
+        disabled={loading || isCompiling}
+        style={{ ...S.btn(TOKEN.orange), opacity: isCompiling ? 0.75 : 1 }}
+      >
+        {isCompiling
+          ? <><FaSpinner style={{ animation: "spin 1s linear infinite" }} size={12} /> Compiling…</>
+          : "⚙ Compile"}
+      </button>
+      <button
+        onClick={() => void stopExecution("Stopped")}
+        disabled={!loading && !isCompiling}
+        style={{
+          ...S.btn(!loading && !isCompiling ? TOKEN.bgDeep : TOKEN.red,
+            !loading && !isCompiling ? TOKEN.textMuted : "#fff"),
+          border: !loading && !isCompiling ? `1px solid ${TOKEN.border}` : "none",
+        }}
+      >
+        <FiSquare size={12} /> Stop
+      </button>
+    </div>
+  );
+
+  /* ────────────────────────────────────────────────────────────
+     RENDER
+  ──────────────────────────────────────────────────────────── */
+  
+  // Loading screen
+  if (authLoading) {
+    return (
+      <div style={{
+        position: "fixed", inset: 0, background: "rgba(255,255,255,0.95)", zIndex: 100,
+        display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 16,
+      }}>
+        <div style={{
+          width: 48, height: 48, borderRadius: "50%", border: "3px solid #e5e7eb",
+          borderTopColor: "#6366f1", animation: "spin 0.8s linear infinite",
+        }} />
+        <div style={{fontSize: 18, fontWeight: 800, color: "#111827"}}>TrustInn Initializing</div>
+        <div style={{fontSize: 13, color: "#9ca3af"}}>Validating your session...</div>
+        <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+      </div>
+    );
+  }
+
+  // Auth gate - show NoAccessError if not authenticated
+  if (!isAuthenticated) {
+    // Import or return auth gate component
+    return (
+      <div style={{
+        position: "fixed", inset: 0, background: "rgba(255,255,255,0.95)", zIndex: 100,
+        display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 20, padding: 20,
+      }}>
+        <div style={{textAlign: "center"}}>
+          <div style={{fontSize: 24, fontWeight: 800, color: "#111827", marginBottom: 8}}>⚠️ Session Expired</div>
+          <div style={{fontSize: 14, color: "#6b7280", marginBottom: 20}}>Your session data has been cleared. Please login again to continue.</div>
+          <button onClick={() => window.location.href = "/"} style={{
+            padding: "10px 20px", background: "linear-gradient(135deg,#6366f1,#8b5cf6)",
+            border: "none", borderRadius: 8, color: "#fff", fontSize: 14, fontWeight: 700,
+            cursor: "pointer", boxShadow: "0 4px 12px rgba(99,102,241,0.3)",
+          }}>
+            ← Go to Login
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      style={{
+        height: "100vh", overflow: "hidden",
+        display: "flex", flexDirection: "column",
+        background: TOKEN.bgSurface,
+        padding: "14px 16px 12px", gap: 10,
+        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+      }}
+    >
+      <style>{`
+        @keyframes spin { to { transform: rotate(360deg); } }
+        * { box-sizing: border-box; }
+        ::-webkit-scrollbar { width: 5px; height: 5px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 99px; }
+      `}</style>
+
+      {/* ── Header ── */}
+      <header
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
+          flexWrap: "wrap",
+          background: TOKEN.bg,
+          border: `1px solid ${TOKEN.border}`,
+          borderRadius: 12,
+         
+          flexShrink: 0,
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+          <Image
+            src="/logo.png"
+            alt="NITMiner logo"
+            width={120}
+            height={48}
+            priority
+          />
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 34, fontWeight: 800, color: TOKEN.text, lineHeight: 1.2 }}>
+              TrustInn
+            </div>
+            <div style={{ fontSize: 15, color: TOKEN.textMuted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              NITMiner Technologies Pvt. Ltd.
+            </div>
+          </div>
+        </div>
+
+       <nav className="flex items-center gap-3 flex-wrap">
+  {!authLoading && userData && (
+    <button
+      onClick={() => setShowSessionModal(true)}
+      className={`flex items-center gap-3 px-4 py-2 rounded-xl border transition-all duration-200 shadow-sm hover:shadow-md active:scale-[0.98]
+        ${userData.isPremium 
+          ? "bg-green-50 border-green-200 hover:bg-green-100" 
+          : "bg-blue-50 border-blue-200 hover:bg-blue-100"
+        }`}
+    >
+      {/* Icon */}
+      {userData.isPremium ? (
+        <Crown size={20} className="text-green-600 shrink-0" />
+      ) : (
+        <Lock size={20} className="text-blue-600 shrink-0" />
+      )}
+
+      {/* Text Content */}
+      <div className="text-left leading-tight">
+        <div className="text-xs font-semibold text-gray-500">
+          session info
+        </div>
+
+       
+      </div>
+    </button>
+  )}
+</nav>
+      </header>
+      
+      {/* Session Info Modal */}
+      <SessionCheckModal
+        isOpen={showSessionModal}
+        user={userData}
+        onClose={() => setShowSessionModal(false)}
+      />
+
+      {/* ── Language Tabs — full width with icons ── */}
+      <div
+        style={{
+          display: "grid", gridTemplateColumns: "repeat(4, 1fr)",
+          gap: 4, background: TOKEN.bg,
+          border: `1px solid ${TOKEN.border}`,
+          borderRadius: 11, padding: 4, flexShrink: 0,
+        }}
+      >
+        {(["c", "java", "python", "solidity"] as Tab[]).map((tab) => {
+          const { label, Icon, iconColor } = LANG_META[tab];
+          const active = currentTab === tab;
+          return (
+            <button
+              key={tab}
+              onClick={() => switchTab(tab)}
+              style={{
+                padding: "8px 0", borderRadius: 8, border: "none",
+                fontSize: 19, fontWeight: active ? 700 : 500,
+                cursor: "pointer",
+                background: active ? TOKEN.text : "transparent",
+                color: active ? "#f9fafb" : TOKEN.textSub,
+                display: "flex", alignItems: "center", justifyContent: "center", gap: 7,
+                transition: "all 0.15s",
+              }}
+            >
+              <Icon size={19} style={{ color: active ? "#fff" : iconColor, flexShrink: 0 }} />
+              {label}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* ── Main Grid ── */}
+      <div
+        style={{
+          display: "grid", gridTemplateColumns: "minmax(0, 0.45fr) minmax(0, 0.85fr)",
+          gap: 10, flex: 1, minHeight: 0, overflow: "hidden",
+        }}
+      >
+        {/* ── Left Panel ── */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, overflow: "hidden" }}>
+
+          {/* Tool config card */}
+          <div style={{ ...S.card, flexShrink: 0 }}>
+            <span style={S.label}>Tool Configuration</span>
+            <label style={{ ...S.label, textTransform: "none", letterSpacing: 0, fontSize: 11, marginBottom: 4 }}>
+              Security tool
+            </label>
+            <select value={currentTool} onChange={(e) => handleToolChange(e.target.value)} style={S.select}>
+              <option value="">Select a tool…</option>
+              {currentTab === "c" && (
+                <>
+                  <option value="Condition Satisfiability Analysis">CC-Bounded Model Checker</option>
+                  <option value="DSE based Mutation Analyser">DSE Mutation Analyser</option>
+                  <option value="Dynamic Symbolic Execution">Dynamic Symbolic Execution</option>
+                  <option value="Dynamic Symbolic Execution with Pruning">DSE with Pruning</option>
+                  <option value="Advance Code Coverage Profiler">Advance Code Coverage Profiler</option>
+                  <option value="Mutation Testing Profiler">Mutation Testing Profiler</option>
+                </>
+              )}
+              {currentTab === "java" && <option value="JBMC">JBMC — Java Bounded Model Checker</option>}
+              {currentTab === "python" && <option value="Condition Coverage Fuzzing">Condition Coverage Fuzzing</option>}
+              {currentTab === "solidity" && <option value="VeriSol">Solidity — Smart Contract Verifier</option>}
+            </select>
+
+            {/* Param boxes */}
+            {currentTab === "c" && cTool === "Condition Satisfiability Analysis" && (
+              <div style={S.paramBox}>
+                <label style={S.paramLabel}>Unwind bound</label>
+                <input type="number" value={cbmcBound} onChange={(e) => setCbmcBound(e.target.value)} style={S.select} />
+              </div>
+            )}
+            {currentTab === "c" && cTool === "DSE based Mutation Analyser" && (
+              <div style={S.paramBox}>
+                <label style={S.paramLabel}>Tool value</label>
+                <select value={kleemaValue} onChange={(e) => setKleemaValue(e.target.value)} style={S.select}>
+                  <option value="1">1</option>
+                  <option value="2">2</option>
+                </select>
+              </div>
+            )}
+            {currentTab === "c" && (cTool === "Advance Code Coverage Profiler" || cTool === "Mutation Testing Profiler") && (
+              <div style={{ ...S.paramBox, display: "flex", flexDirection: "column", gap: 8 }}>
+                <div>
+                  <label style={S.paramLabel}>Version</label>
+                  <select
+                    value={cTool === "Advance Code Coverage Profiler" ? gmcovVersion : gmutantVersion}
+                    onChange={(e) => cTool === "Advance Code Coverage Profiler" ? setGmcovVersion(e.target.value) : setGmutantVersion(e.target.value)}
+                    style={S.select}
+                  ><option value="4">4</option></select>
+                </div>
+                <div>
+                  <label style={S.paramLabel}>Time bound (s)</label>
+                  <input
+                    type="number"
+                    value={cTool === "Advance Code Coverage Profiler" ? gmcovTimebound : gmutantTimebound}
+                    onChange={(e) => cTool === "Advance Code Coverage Profiler" ? setGmcovTimebound(e.target.value) : setGmutantTimebound(e.target.value)}
+                    style={S.select}
+                  />
+                </div>
+                {cTool === "Mutation Testing Profiler" && (
+                  <div style={{ background: "#fffbeb", border: "1px solid #fcd34d", borderRadius: 7, padding: "7px 10px", fontSize: 10.5, color: "#92400e", lineHeight: 1.5 }}>
+                    ⚠️ Generates mutants from C source. Requires <code style={{ background: "#fef3c7", padding: "1px 4px", borderRadius: 3 }}>main()</code>.
+                  </div>
+                )}
+              </div>
+            )}
+            {currentTab === "solidity" && solidityTool === "VeriSol" && (
+              <div style={S.paramBox}>
+                <label style={S.paramLabel}>Verification mode</label>
+                <select value={solidityMode} onChange={(e) => setSolidityMode(e.target.value)} style={S.select}>
+                  <option value="bmc">Bounded Model Checker</option>
+                  <option value="chc">Constrained Horn Clauses</option>
+                </select>
+              </div>
+            )}
+          </div>
+
+          {/* Input card */}
+          <div
+            style={{
+              ...S.card, padding: 0,
+              display: "flex", flexDirection: "column",
+              flex: 1, minHeight: 0, overflow: "hidden",
+            }}
+          >
+            <div
+              style={{
+                padding: "9px 14px", borderBottom: `1px solid ${TOKEN.border}`,
+                display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0,
+              }}
+            >
+              <span style={{ fontSize: 12, fontWeight: 700, color: TOKEN.text }}>Input</span>
+              <div style={{ display: "flex", gap: 3, background: TOKEN.bgDeep, borderRadius: 999, padding: 3, border: `1px solid ${TOKEN.border}` }}>
+                {(["file", "code"] as InputMode[]).map((m) => (
+                  <button
+                    key={m}
+                    onClick={() => setInputMode(m)}
+                    style={{
+                      padding: "4px 12px", fontSize: 11, borderRadius: 999,
+                      border: "none", cursor: "pointer",
+                      background: inputMode === m ? TOKEN.text : "transparent",
+                      color: inputMode === m ? "#f9fafb" : TOKEN.textSub,
+                      fontWeight: inputMode === m ? 600 : 400, transition: "all 0.15s",
+                    }}
+                  >
+                    {m.charAt(0).toUpperCase() + m.slice(1)}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "12px 14px", display: "flex", flexDirection: "column", gap: 9 }}>
+              {inputMode === "file" ? (
+                <>
+                  <div
+                    onClick={browseLocalFile}
+                    style={{
+                      border: "1.5px dashed #c7d2fe", borderRadius: 10,
+                      padding: "16px 12px", textAlign: "center",
+                      background: "#eef2ff", cursor: "pointer",
+                    }}
+                  >
+                    <div style={{ fontSize: 20, marginBottom: 4 }}>☁</div>
+                    <div style={{ fontSize: 11, color: TOKEN.textSub, marginBottom: 7 }}>
+                      Drag &amp; drop or click to browse
+                    </div>
+                    <span style={{ fontSize: 11, color: TOKEN.accent, fontWeight: 700, background: TOKEN.bg, border: `1px solid #c7d2fe`, borderRadius: 6, padding: "4px 14px" }}>
+                      Browse File
+                    </span>
+                  </div>
+
+                  {(selectedLocalFilePath[currentTab] || selectedSamplePath[currentTab]) && (
+                    <div style={{ padding: "7px 10px", borderRadius: 7, border: `1px solid ${TOKEN.border}`, background: TOKEN.bgSurface, fontSize: 10.5, color: TOKEN.textSub, wordBreak: "break-all" }}>
+                      📄 {getFileName(selectedLocalFilePath[currentTab] || selectedSamplePath[currentTab])}
+                    </div>
+                  )}
+
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                    <button onClick={loadSamplesForTool} disabled={isLoadingSamples} style={{ ...S.outlineBtn, width: "100%" }}>
+                      {isLoadingSamples ? "Loading…" : "📂 Load Sample"}
+                    </button>
+                    <button
+                      onClick={async () => {
+                        const src = selectedLocalFilePath[currentTab] || selectedSamplePath[currentTab];
+                        if (!src) { mockAppendOutput(currentTab, "❌ No file selected."); return; }
+                        try {
+                          const content = await window.electronAPI?.readFile(src);
+                          setFileViewerContent(content || "");
+                          setFileViewerLanguage(currentTab);
+                          setFileViewerOpen(true);
+                        } catch (error) {
+                          mockAppendOutput(currentTab, `❌ Error reading file: ${error instanceof Error ? error.message : "Unknown error"}`);
+                        }
+                      }}
+                      style={{ ...S.outlineBtn, width: "100%" }}
+                    >
+                      <FiEye size={13} /> View File
+                    </button>
+                  </div>
+
+                  <ActionButtons />
+                </>
+              ) : (
+                <>
+                  <div style={{ background: "#d1fae5", border: "1px solid #6ee7b7", borderRadius: 8, padding: "7px 10px", fontSize: 11, color: "#065f46", lineHeight: 1.5 }}>
+                    ✅ Write or paste your code below, select a security tool, and click Execute to analyze it.
+                  </div>
+                  <Suspense fallback={<div style={{ height: 160, background: TOKEN.bgDeep, borderRadius: 8 }} />}>
+                    <CodeEditor
+                      code={userCode[currentTab]}
+                      language={currentTab}
+                      onCodeChange={(code: string) => setUserCode((prev) => ({ ...prev, [currentTab]: code }))}
+                      onExecute={() => executeCommand(currentTab)}
+                      onStop={() => void stopExecution("Stopped")}
+                      isExecuting={loading}
+                      toolSelected={Boolean(currentTool)}
+                      onCompile={() => compileCode(currentTab)}
+                      isCompiling={isCompiling}
+                    />
+                  </Suspense>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* ── Right Panel: Terminal ── */}
+        <div
+          style={{
+            background: TOKEN.termSurface,
+            borderRadius: 12,
+            border: `1px solid ${TOKEN.termBorder}`,
+            display: "flex", flexDirection: "column",
+            overflow: "hidden",
+          }}
+        >
+          {/* Terminal header — Stop + Analytics live here */}
+          <div
+            style={{
+              padding: "8px 12px",
+              borderBottom: `1px solid ${TOKEN.termBorder}`,
+              display: "flex", alignItems: "center", gap: 6,
+              flexShrink: 0,
+            }}
+          >
+            {/* macOS window dots */}
+            <div style={{ display: "flex", gap: 5, flexShrink: 0, marginRight: 4 }}>
+              {["#f97373", "#facc15", "#34d399"].map((c) => (
+                <span key={c} style={{ width: 9, height: 9, borderRadius: "50%", background: c }} />
+              ))}
+            </div>
+
+            <span
+              style={{
+                fontSize: 11, color: "#9ca3af",
+                fontFamily: '"JetBrains Mono", monospace', flexShrink: 0,
+              }}
+            >
+              Terminal · {currentTab.toUpperCase()}
+            </span>
+
+            {(loading || isCompiling) && (
+              <span
+                style={{
+                  marginLeft: 8,
+                  fontSize: 10.5,
+                  color: "#93c5fd",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 5,
+                  fontFamily: '"JetBrains Mono", monospace',
+                }}
+              >
+                <FaSpinner style={{ animation: "spin 1s linear infinite" }} size={10} />
+                {loading ? "Executing..." : "Compiling..."}
+              </span>
+            )}
+
+            {/* Right-aligned controls */}
+            <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 1 }}>
+              {/* Copy */}
+              <button onClick={copyToClipboard} style={S.termBtn} >
+                <FiCopy size={11} /> Copy
+              </button>
+
+              {/* Clear */}
+              <button
+                onClick={() => setTerminalOutputs((p) => ({ ...p, [currentTab]: "" }))}
+                style={S.termBtn}
+              >
+                Clear
+              </button>
+
+              {/* Separator */}
+              <span style={{ width: 1, height: 14, background: "#1e293b", margin: "0 4px" }} />
+
+              {/* Stop */}
+              <button
+                onClick={() => void stopExecution("Execution stopped")}
+                disabled={!loading && !isCompiling}
+                title="Stop execution"
+                style={{
+                  ...S.termBtn,
+                  color: (!loading && !isCompiling) ? "#374151" : "#f87171",
+                  opacity: (!loading && !isCompiling) ? 0.45 : 1,
+                  cursor: (!loading && !isCompiling) ? "not-allowed" : "pointer",
+                  gap: 4,
+                }}
+              >
+                <FiStopCircle size={13} /> Stop
+              </button>
+
+              {/* Separator */}
+              <span style={{ width: 1, height: 14, background: "#1e293b", margin: "0 4px" }} />
+
+              {/* View Analytics — accent pill */}
+              <button
+                onClick={() => setDrawerOpen(true)}
+                title="View analytics"
+                style={{
+                  ...S.termBtn,
+                  color: "#818cf8",
+                  background: "rgba(99,102,241,0.12)",
+                  border: "1px solid rgba(99,102,241,0.2)",
+                  borderRadius: 6,
+                  padding: "3px 9px",
+                  fontWeight: 600,
+                  fontSize: 11,
+                  gap: 5,
+                }}
+              >
+                <FiBarChart2 size={12} /> View Analytics
+              </button>
+            </div>
+          </div>
+
+          {/* Terminal body — scrollable */}
+          <div
+            ref={terminalRef}
+            style={{
+              flex: 1, minHeight: 0, overflowY: "auto",
+              padding: "12px 16px",
+              fontSize: 12.5, lineHeight: 1.7,
+              background: TOKEN.termBg,
+              fontFamily: '"JetBrains Mono", "Fira Code", ui-monospace, monospace',
+            }}
+          >
+            {terminalLines.some((l) => l.trim()) ? (
+              terminalLines.map((line, i) => (
+                <div
+                  key={`${i}-${line}`}
+                  style={{
+                    display: "flex", gap: 10,
+                    padding: "2px 5px", borderRadius: 3, marginBottom: 1,
+                    ...getLineStyle(line),
+                  }}
+                >
+                  <span style={{ color: "#374151", flexShrink: 0, fontSize: 9.5, marginTop: 3, userSelect: "none", minWidth: 28, textAlign: "right" }}>
+                    {String(i + 1).padStart(3, "0")}
+                  </span>
+                  <span style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", flex: 1 }}>
+                    {line}
+                  </span>
+                </div>
+              ))
+            ) : (
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "#374151", fontSize: 12 }}>
+                Terminal ready — execute a tool to see output
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* ── Analytics Drawer (30% width, right→left) ── */}
+      <AnalyticsDrawer
+        open={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        chartData={chartData}
+        chartType={chartType}
+        setChartType={setChartType}
+        visualizationTitle={visualizationTitle}
+        loading={loading}
+        percentageItems={percentageItems}
+        onCopyPercentageItem={copyPercentageItem}
+      />
+
+      {/* ── Sample Picker Modal ── */}
+      <SamplePickerModal
+        open={sampleModalOpen}
+        title={`Choose sample (${currentTab.toUpperCase()})`}
+        samples={sampleOptions[currentTab]}
+        onClose={() => setSampleModalOpen(false)}
+        onSelect={(sample) => {
+          setSelectedSamplePath((prev) => ({ ...prev, [currentTab]: sample.path }));
+          setSelectedLocalFilePath((prev) => ({ ...prev, [currentTab]: "" }));
+          setSampleModalOpen(false);
+          mockAppendOutput(currentTab, `✅ Selected sample: ${sample.name}`);
+        }}
+      />
+
+      {/* ── File Viewer Modal ── */}
+      {fileViewerOpen && (
+        <div style={{
+          position: "fixed", top: 0, left: 0, right: 0, bottom: 0,
+          background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center",
+          zIndex: 9999,
+        }} onClick={() => setFileViewerOpen(false)}>
+          <div style={{
+            background: "#ffffff", borderRadius: 12, width: "90%", maxWidth: "900px",
+            maxHeight: "85vh", display: "flex", flexDirection: "column",
+            boxShadow: "0 20px 25px -5px rgba(0,0,0,0.3)",
+            overflow: "hidden",
+          }} onClick={(e) => e.stopPropagation()}>
+            {/* Modal Header */}
+            <div style={{
+              padding: "16px 20px", borderBottom: "1px solid #e5e7eb",
+              display: "flex", justifyContent: "space-between", alignItems: "center",
+              background: "#f9fafb",
+            }}>
+              <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600, color: "#1f2937" }}>
+                📄 File Content ({fileViewerLanguage.toUpperCase()})
+              </h3>
+              <button
+                onClick={() => setFileViewerOpen(false)}
+                style={{
+                  background: "none", border: "none", fontSize: 20, cursor: "pointer",
+                  color: "#6b7280", padding: 0,
+                }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Modal Body — Code Display */}
+            <div style={{
+              flex: 1, overflow: "auto", background: "#f3f4f6", padding: 0,
+            }}>
+              <SyntaxHighlighter
+                language={fileViewerLanguage}
+                style={oneLight}
+                customStyle={{
+                  margin: 0, background: "#f3f4f6", fontSize: 12,
+                  lineHeight: 1.5, fontFamily: '"JetBrains Mono", monospace',
+                }}
+              >
+                {fileViewerContent}
+              </SyntaxHighlighter>
+            </div>
+
+            {/* Modal Footer */}
+            <div style={{
+              padding: "12px 20px", borderTop: "1px solid #e5e7eb",
+              background: "#f9fafb", display: "flex", gap: 8, justifyContent: "flex-end",
+            }}>
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(fileViewerContent);
+                  mockAppendOutput(currentTab, "✅ Copied to clipboard");
+                }}
+                style={{
+                  padding: "8px 16px", borderRadius: 6, border: "1px solid #d1d5db",
+                  background: "#ffffff", color: "#374151", cursor: "pointer",
+                  fontSize: 13, fontWeight: 500,
+                }}
+              >
+                📋 Copy Content
+              </button>
+              <button
+                onClick={() => setFileViewerOpen(false)}
+                style={{
+                  padding: "8px 16px", borderRadius: 6, border: "none",
+                  background: "#3b82f6", color: "#ffffff", cursor: "pointer",
+                  fontSize: 13, fontWeight: 500,
+                }}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

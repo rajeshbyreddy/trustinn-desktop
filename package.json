@@ -1,26 +1,93 @@
 {
   "name": "trustinn-desktop",
-  "version": "0.1.0",
+  "version": "0.0.1",
+  "main": "electron/main.cjs",
   "private": true,
+  "homepage": "https://github.com/yourusername/trustinn-desktop",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/trustinn-desktop.git"
+  },
   "scripts": {
     "dev": "next dev",
+    "electron": "electron .",
+    "electron-dev": "concurrently -k \"npm:dev\" \"wait-on tcp:3000 && npm run electron\"",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "electron-build:win": "npm run build && electron-builder --win --publish never",
+    "electron-build:win:publish": "npm run build && electron-builder --win --publish always"
   },
   "dependencies": {
+    "@monaco-editor/react": "^4.7.0",
+    "@use-gesture/react": "^10.3.1",
+    "electron-updater": "^6.1.1",
+    "jsonwebtoken": "^9.0.3",
+    "lucide-react": "^1.8.0",
+    "monaco-editor": "^0.55.1",
+    "mongoose": "^9.4.1",
     "next": "16.2.3",
+    "next-auth": "^4.24.13",
     "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react-dom": "19.2.4",
+    "react-icons": "^5.6.0",
+    "react-markdown": "^10.1.0",
+    "react-simple-code-editor": "^0.14.1",
+    "react-syntax-highlighter": "^16.1.1",
+    "recharts": "^3.8.1"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "concurrently": "^9.2.1",
+    "electron": "^41.2.0",
+    "electron-builder": "^25.1.1",
     "eslint": "^9",
     "eslint-config-next": "16.2.3",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "wait-on": "^9.0.5"
+  },
+  "build": {
+    "appId": "com.trustinn.desktop",
+    "productName": "TrustINN Desktop",
+    "files": [
+      "out/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "directories": {
+      "output": "dist",
+      "buildResources": "assets"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "TrustINN Desktop",
+      "include": "electron/installer.nsh"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "yourusername",
+        "repo": "trustinn-desktop",
+        "releaseType": "release"
+      }
+    ]
   }
 }

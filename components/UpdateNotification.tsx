@@ -1,0 +1,132 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { FiDownload, FiX } from "react-icons/fi";
+
+interface UpdateInfo {
+  version: string;
+  files: Array<{ url: string; sha512: string; size: number }>;
+  path: string;
+  sha512: string;
+  releaseDate: string;
+}
+
+interface DownloadProgress {
+  percent: number;
+  bytesPerSecond: number;
+  transferred: number;
+  total: number;
+}
+
+export function UpdateNotification() {
+  const [updateAvailable, setUpdateAvailable] = useState(false);
+  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState<DownloadProgress | null>(null);
+  const [dismissed, setDismissed] = useState(false);
+
+  useEffect(() => {
+    if (typeof window !== "undefined" && (window as any).electronAPI) {
+      const handleUpdateAvailable = (info: UpdateInfo) => {
+        console.log("Update available:", info);
+        setUpdateInfo(info);
+        setUpdateAvailable(true);
+      };
+
+      const handleDownloadProgress = (progress: DownloadProgress) => {
+        setDownloadProgress(progress);
+        setIsDownloading(true);
+      };
+
+      const handleUpdateDownloaded = () => {
+        setIsDownloading(false);
+        setDownloadProgress(null);
+      };
+
+      (window as any).electronAPI?.onUpdateAvailable?.(handleUpdateAvailable);
+      (window as any).electronAPI?.onUpdateProgress?.(handleDownloadProgress);
+      (window as any).electronAPI?.onUpdateDownloaded?.(handleUpdateDownloaded);
+    }
+  }, []);
+
+  if (!updateAvailable || dismissed) {
+    return null;
+  }
+
+  const progressPercent = downloadProgress?.percent ?? 0;
+  const speedMBps = downloadProgress ? (downloadProgress.bytesPerSecond / 1024 / 1024).toFixed(2) : "0";
+
+  return (
+    <div className="fixed bottom-4 right-4 bg-white rounded-lg shadow-lg border-l-4 border-blue-500 overflow-hidden z-40 max-w-sm">
+      <div className="p-4">
+        {/* Header */}
+        <div className="flex items-start justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <FiDownload className="text-blue-500 text-xl" />
+            <div>
+              <h3 className="font-semibold text-gray-800">Update Available</h3>
+              <p className="text-xs text-gray-500">Version {updateInfo?.version}</p>
+            </div>
+          </div>
+          <button
+            onClick={() => setDismissed(true)}
+            className="text-gray-400 hover:text-gray-600 transition"
+            aria-label="Dismiss"
+          >
+            <FiX className="text-lg" />
+          </button>
+        </div>
+
+        {/* Progress or Action */}
+        {isDownloading ? (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-gray-600">Downloading update...</span>
+              <span className="text-blue-600 font-medium">{progressPercent}%</span>
+            </div>
+            
+            {/* Progress Bar */}
+            <div className="w-full bg-gray-200 rounded-full h-1.5 overflow-hidden">
+              <div
+                className="bg-blue-500 h-full transition-all duration-200"
+                style={{ width: `${progressPercent}%` }}
+              />
+            </div>
+
+            <p className="text-xs text-gray-500">
+              Speed: {speedMBps} MB/s
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <p className="text-sm text-gray-600">
+              A new version of TrustINN Desktop is available. Click below to update.
+            </p>
+            
+            <button
+              onClick={async () => {
+                setIsDownloading(true);
+                try {
+                  await (window as any).electronAPI?.quitAndInstall?.();
+                } catch (error) {
+                  console.error("Update failed:", error);
+                  setIsDownloading(false);
+                }
+              }}
+              className="w-full bg-blue-500 hover:bg-blue-600 text-white font-medium py-2 px-4 rounded transition"
+            >
+              Update Now
+            </button>
+
+            <button
+              onClick={() => setDismissed(true)}
+              className="w-full text-gray-600 hover:text-gray-800 text-sm py-1 transition"
+            >
+              Remind me later
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
