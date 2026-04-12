@@ -1,6 +1,6 @@
 {
   "name": "trustinn-desktop",
-  "version": "0.0.7",
+  "version": "0.0.8",
   "description": "Professional desktop application for TrustINN with Docker integration and auto-updates",
   "author": "Rajesh Byreddy",
   "main": "electron/main.cjs",
