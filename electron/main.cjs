@@ -398,8 +398,25 @@ function createMainWindow() {
     mainWindow.loadURL(devUrl);
     mainWindow.webContents.openDevTools({ mode: "detach" });
   } else {
-    // In production, use app.getAppPath() to correctly resolve paths within asar
-    const indexPath = path.join(app.getAppPath(), "out", "index.html");
+    const candidatePaths = [
+      path.join(app.getAppPath(), "out", "index.html"),
+      path.join(process.resourcesPath, "app.asar", "out", "index.html"),
+      path.join(process.resourcesPath, "out", "index.html"),
+    ];
+
+    const indexPath = candidatePaths.find((candidate) => fs.existsSync(candidate));
+
+    if (!indexPath) {
+      const message = [
+        "Unable to find Next.js static build output.",
+        "Expected index.html in one of:",
+        ...candidatePaths.map((p) => ` - ${p}`),
+      ].join("\n");
+      console.error("[MAIN]", message);
+      dialog.showErrorBox("Startup Error", message);
+      return mainWindow;
+    }
+
     console.log("[MAIN] Loading index.html from:", indexPath);
     mainWindow.loadFile(indexPath);
   }
