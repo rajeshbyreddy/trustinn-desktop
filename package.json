@@ -17,6 +17,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "generate:icon": "npx --yes icon-gen -i public/logo.png -o assets --ico --icns --ico-name logo --icns-name logo --ico-sizes 16,24,32,48,64,128,256 --icns-sizes 16,32,64,128,256,512,1024",
+    "build:win": "npm run build && electron-builder --win --publish never",
+    "build:mac:dmg": "npm run build && electron-builder --mac dmg zip --publish never",
     "electron-build:win": "npm run build && electron-builder --win --publish never",
     "electron-build:win:publish": "npm run build && electron-builder --win --publish always"
   },

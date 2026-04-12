@@ -1,98 +1,102 @@
-name: Build and Release
+name: Build macOS DMG
+
+permissions:
+  contents: write
 
 on:
   push:
     tags:
       - 'v*'
-    branches:
-      - main
+      - '*.*.*'
   workflow_dispatch:
 
-permissions:
-  contents: write
-
 jobs:
-  build:
+  build-mac:
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: .
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: ./package-lock.json
+
+      - name: Install dependencies (trustinn-desktop)
+        run: npm ci
+
+      - name: Generate macOS icon
+        run: npm run generate:icon
+
+      - name: Build macOS DMG
+        run: npm run build:mac:dmg
+
+      - name: Upload DMG to Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            dist/**/*.dmg
+            dist/**/*.zip
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-dmg
+          path: |
+            dist/*.dmg
+            dist/*.zip
+          retention-days: 30
+
+  build-win:
     runs-on: windows-latest
 
     steps:
-    - uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    - name: Use Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: '20.11.0'
-        cache: 'npm'
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
 
-    - name: Install dependencies
-      run: npm ci
+      - name: Install dependencies (trustinn-desktop)
+        run: npm ci
 
-    - name: Build Next.js
-      run: npm run build
+      - name: Build Windows installer
+        run: npm run build:win
 
-    - name: Build Electron app (Windows)
-      run: npm run electron-build:win
-      continue-on-error: false
+      - name: Upload Windows assets to Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            dist/*.exe
+            dist/*.blockmap
+            dist/latest*.yml
+          draft: false
+          prerelease: false
+          fail_on_unmatched_files: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Get version from tag
-      id: get_version
-      run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
-      if: startsWith(github.ref, 'refs/tags/')
-
-    - name: Create Release
-      uses: softprops/action-gh-release@v1
-      if: startsWith(github.ref, 'refs/tags/')
-      with:
-        files: |
-          dist/**/*.exe
-          dist/**/*.exe.blockmap
-          dist/latest.yml
-        token: ${{ secrets.GITHUB_TOKEN }}
-        tag_name: ${{ github.ref_name }}
-        generate_release_notes: true
-        draft: false
-        prerelease: false
-      env:
-        VERSION: ${{ steps.get_version.outputs.VERSION }}
-
-    - name: Upload artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: trustinn-desktop-windows
-        path: dist/
-
-  version-tag:
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    
-    steps:
-    - uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
-    
-    - name: Check if version changed
-      id: check_version
-      run: |
-        VERSION=$(cat package.json | grep '"version"' | head -1 | cut -d'"' -f4)
-        TAG="v$VERSION"
-        echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
-        echo "TAG=$TAG" >> $GITHUB_OUTPUT
-        
-        # Check if tag exists
-        if git rev-parse "$TAG" >/dev/null 2>&1; then
-          echo "Tag already exists"
-          echo "TAG_EXISTS=true" >> $GITHUB_OUTPUT
-        else
-          echo "New tag needed"
-          echo "TAG_EXISTS=false" >> $GITHUB_OUTPUT
-        fi
-
-    - name: Create git tag
-      if: steps.check_version.outputs.TAG_EXISTS == 'false'
-      run: |
-        git config user.name "GitHub Actions"
-        git config user.email "actions@github.com"
-        git tag ${{ steps.check_version.outputs.TAG }}
-        git push origin ${{ steps.check_version.outputs.TAG }}
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: |
+            dist/*.exe
+            dist/*.blockmap
+            dist/latest*.yml
+          retention-days: 30
