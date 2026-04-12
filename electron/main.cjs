@@ -386,6 +386,7 @@ function createMainWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      webSecurity: true,
     },
   });
 
@@ -397,7 +398,10 @@ function createMainWindow() {
     mainWindow.loadURL(devUrl);
     mainWindow.webContents.openDevTools({ mode: "detach" });
   } else {
-    mainWindow.loadFile(path.join(__dirname, "../out/index.html"));
+    // In production, use app.getAppPath() to correctly resolve paths within asar
+    const indexPath = path.join(app.getAppPath(), "out", "index.html");
+    console.log("[MAIN] Loading index.html from:", indexPath);
+    mainWindow.loadFile(indexPath);
   }
 
   return mainWindow;

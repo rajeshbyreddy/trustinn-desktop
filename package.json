@@ -74,9 +74,7 @@
           ]
         }
       ],
-      "icon": "assets/logo.png",
-      "certificateFile": null,
-      "certificatePassword": null
+      "icon": "assets/logo.ico"
     },
     "nsis": {
       "oneClick": false,
@@ -84,8 +82,8 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "TrustINN Desktop",
-      "installerIcon": "assets/logo.png",
-      "uninstallerIcon": "assets/logo.png"
+      "installerIcon": "assets/logo.ico",
+      "uninstallerIcon": "assets/logo.ico"
     },
     "publish": [
       {
