@@ -33,9 +33,7 @@ jobs:
       run: npm run build
 
     - name: Build Electron app (Windows)
-      run: npm run electron-build:win:publish
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: npm run electron-build:win
       continue-on-error: false
 
     - name: Get version from tag
