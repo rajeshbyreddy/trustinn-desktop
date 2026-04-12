@@ -8,7 +8,6 @@ const { autoUpdater } = require("electron-updater");
 const setupDocker = require("./setup-docker.cjs");
 
 const isDev = !app.isPackaged;
-const devUrl = process.env.ELECTRON_RENDERER_URL || "http://localhost:3000";
 const DEFAULT_IMAGE = process.env.TRUSTINN_IMAGE || "rajeshbyreddy95/trustinn-tools:4.1.2";
 const DEFAULT_PLATFORM = process.env.TRUSTINN_PLATFORM || "linux/amd64";
 const DEFAULT_RESULTS_DIR = process.env.TRUSTINN_RESULTS_DIR || path.join(os.homedir(), "Downloads", "TrustinnDownloads");
@@ -395,7 +394,7 @@ function createMainWindow() {
   });
 
   if (isDev) {
-    mainWindow.loadURL(devUrl);
+    mainWindow.loadURL("http://localhost:3000");
     mainWindow.webContents.openDevTools({ mode: "detach" });
   } else {
     const candidatePaths = [

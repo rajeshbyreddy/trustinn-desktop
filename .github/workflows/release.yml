@@ -15,7 +15,7 @@ jobs:
     runs-on: macos-latest
     defaults:
       run:
-        working-directory: .
+        working-directory: ./trustinn-desktop
     
     steps:
       - name: Checkout code
@@ -26,7 +26,7 @@ jobs:
         with:
           node-version: '18'
           cache: 'npm'
-          cache-dependency-path: ./package-lock.json
+          cache-dependency-path: trustinn-desktop/package-lock.json
 
       - name: Install dependencies (trustinn-desktop)
         run: npm ci
@@ -42,8 +42,8 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            dist/**/*.dmg
-            dist/**/*.zip
+            trustinn-desktop/dist/**/*.dmg
+            trustinn-desktop/dist/**/*.zip
           draft: false
           prerelease: false
         env:
@@ -54,8 +54,8 @@ jobs:
         with:
           name: macos-dmg
           path: |
-            dist/*.dmg
-            dist/*.zip
+            trustinn-desktop/dist/*.dmg
+            trustinn-desktop/dist/*.zip
           retention-days: 30
 
   build-win:
@@ -72,9 +72,11 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies (trustinn-desktop)
-        run: npm ci
+        working-directory: ./trustinn-desktop
+        run: npm install
 
       - name: Build Windows installer
+        working-directory: ./trustinn-desktop
         run: npm run build:win
 
       - name: Upload Windows assets to Release
@@ -82,9 +84,9 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            dist/*.exe
-            dist/*.blockmap
-            dist/latest*.yml
+            trustinn-desktop/dist/*.exe
+            trustinn-desktop/dist/*.blockmap
+            trustinn-desktop/dist/latest*.yml
           draft: false
           prerelease: false
           fail_on_unmatched_files: false
@@ -96,7 +98,7 @@ jobs:
         with:
           name: windows-installer
           path: |
-            dist/*.exe
-            dist/*.blockmap
-            dist/latest*.yml
+            trustinn-desktop/dist/*.exe
+            trustinn-desktop/dist/*.blockmap
+            trustinn-desktop/dist/latest*.yml
           retention-days: 30
