@@ -1,6 +1,8 @@
 {
   "name": "trustinn-desktop",
   "version": "0.0.1",
+  "description": "Professional desktop application for TrustINN with Docker integration and auto-updates",
+  "author": "Rajesh Byreddy",
   "main": "electron/main.cjs",
   "private": true,
   "homepage": "https://github.com/rajeshbyreddy/trustinn-desktop",
@@ -78,8 +80,7 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "TrustINN Desktop",
-      "include": "electron/installer.nsh"
+      "shortcutName": "TrustINN Desktop"
     },
     "publish": [
       {
