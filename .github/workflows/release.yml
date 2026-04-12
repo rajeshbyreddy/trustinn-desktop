@@ -36,6 +36,7 @@ jobs:
       run: npm run electron-build:win:publish
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      continue-on-error: false
 
     - name: Get version from tag
       id: get_version
@@ -70,6 +71,8 @@ jobs:
     
     steps:
     - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
     
     - name: Check if version changed
       id: check_version
