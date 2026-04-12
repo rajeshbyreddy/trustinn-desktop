@@ -3,10 +3,10 @@
   "version": "0.0.1",
   "main": "electron/main.cjs",
   "private": true,
-  "homepage": "https://github.com/yourusername/trustinn-desktop",
+  "homepage": "https://github.com/rajeshbyreddy/trustinn-desktop",
   "repository": {
     "type": "git",
-    "url": "https://github.com/yourusername/trustinn-desktop.git"
+    "url": "https://github.com/rajeshbyreddy/trustinn-desktop.git"
   },
   "scripts": {
     "dev": "next dev",
@@ -84,7 +84,7 @@
     "publish": [
       {
         "provider": "github",
-        "owner": "yourusername",
+        "owner": "rajeshbyreddy",
         "repo": "trustinn-desktop",
         "releaseType": "release"
       }
