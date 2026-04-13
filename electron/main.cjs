@@ -16,6 +16,7 @@ const IS_WIN = process.platform === "win32";
 let activeToolProcess = null;
 let mainWindow = null;
 let configuredResultsDir = DEFAULT_RESULTS_DIR;
+let hasRegisteredStaticAssetRewrite = false;
 
 try {
   const startupConfig = setupDocker.parseConfig();
@@ -46,6 +47,56 @@ function resolveStaticRouteHtml(route) {
   ];
 
   return candidatePaths.find((candidate) => fs.existsSync(candidate)) || "";
+}
+
+function rewriteExportedAssetUrl(rawUrl) {
+  if (!rawUrl || typeof rawUrl !== "string" || !rawUrl.startsWith("file://")) {
+    return "";
+  }
+
+  let parsed;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    return "";
+  }
+
+  const decodedPath = decodeURIComponent(parsed.pathname || "");
+  const outMarker = "/out/";
+  const outIndex = decodedPath.indexOf(outMarker);
+  if (outIndex < 0) return "";
+
+  const afterOut = decodedPath.slice(outIndex + outMarker.length);
+  const nestedNextMarker = "/_next/";
+  const nestedNextIndex = afterOut.indexOf(nestedNextMarker);
+
+  // Only rewrite nested route assets like out/tools/_next/* to out/_next/*.
+  if (nestedNextIndex <= 0) return "";
+
+  const rewrittenPath =
+    decodedPath.slice(0, outIndex + outMarker.length) +
+    "_next/" +
+    afterOut.slice(nestedNextIndex + nestedNextMarker.length);
+
+  if (rewrittenPath === decodedPath) return "";
+
+  parsed.pathname = rewrittenPath;
+  return parsed.toString();
+}
+
+function registerStaticAssetRewrite(session) {
+  if (hasRegisteredStaticAssetRewrite || !session) return;
+
+  session.webRequest.onBeforeRequest({ urls: ["file://*/*"] }, (details, callback) => {
+    const redirectURL = rewriteExportedAssetUrl(details.url);
+    if (redirectURL) {
+      callback({ redirectURL });
+      return;
+    }
+    callback({});
+  });
+
+  hasRegisteredStaticAssetRewrite = true;
 }
 
 function getDockerVolumePath(hostPath) {
@@ -429,6 +480,8 @@ function createMainWindow() {
   mainWindow.once("ready-to-show", () => {
     mainWindow.show();
   });
+
+  registerStaticAssetRewrite(mainWindow.webContents.session);
 
   if (isDev) {
     mainWindow.loadURL("http://localhost:3000");
