@@ -15,6 +15,38 @@ const IS_MAC = process.platform === "darwin";
 const IS_WIN = process.platform === "win32";
 let activeToolProcess = null;
 let mainWindow = null;
+let configuredResultsDir = DEFAULT_RESULTS_DIR;
+
+try {
+  const startupConfig = setupDocker.parseConfig();
+  if (startupConfig?.resultsDir) {
+    configuredResultsDir = startupConfig.resultsDir;
+  }
+} catch (error) {
+  console.warn("[SETUP] Failed to read startup config:", error instanceof Error ? error.message : String(error));
+}
+
+function normalizeAppRoute(route) {
+  if (typeof route !== "string") return "/";
+  const trimmed = route.trim();
+  if (!trimmed || trimmed === "/") return "/";
+  return trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
+}
+
+function resolveStaticRouteHtml(route) {
+  const normalized = normalizeAppRoute(route);
+  const relativePath = normalized === "/"
+    ? path.join("out", "index.html")
+    : path.join("out", normalized.replace(/^\/+/, ""), "index.html");
+
+  const candidatePaths = [
+    path.join(app.getAppPath(), relativePath),
+    path.join(process.resourcesPath, "app.asar", relativePath),
+    path.join(process.resourcesPath, relativePath),
+  ];
+
+  return candidatePaths.find((candidate) => fs.existsSync(candidate)) || "";
+}
 
 function getDockerVolumePath(hostPath) {
   // Ensure path is always absolute for Docker volumes
@@ -365,6 +397,11 @@ async function initializeDockerSetup() {
       return false;
     }
 
+    if (result?.config?.resultsDir) {
+      configuredResultsDir = result.config.resultsDir;
+      console.log("[SETUP] Using configured results directory:", configuredResultsDir);
+    }
+
     console.log("[SETUP] Docker setup completed successfully");
     return true;
   } catch (error) {
@@ -397,15 +434,14 @@ function createMainWindow() {
     mainWindow.loadURL("http://localhost:3000");
     mainWindow.webContents.openDevTools({ mode: "detach" });
   } else {
-    const candidatePaths = [
-      path.join(app.getAppPath(), "out", "index.html"),
-      path.join(process.resourcesPath, "app.asar", "out", "index.html"),
-      path.join(process.resourcesPath, "out", "index.html"),
-    ];
-
-    const indexPath = candidatePaths.find((candidate) => fs.existsSync(candidate));
+    const indexPath = resolveStaticRouteHtml("/");
 
     if (!indexPath) {
+      const candidatePaths = [
+        path.join(app.getAppPath(), "out", "index.html"),
+        path.join(process.resourcesPath, "app.asar", "out", "index.html"),
+        path.join(process.resourcesPath, "out", "index.html"),
+      ];
       const message = [
         "Unable to find Next.js static build output.",
         "Expected index.html in one of:",
@@ -430,6 +466,33 @@ app.whenReady().then(() => {
       platform: process.platform,
       date: new Date().toISOString(),
     };
+  });
+
+  ipcMain.handle("app:navigate", async (_, route) => {
+    const normalizedRoute = normalizeAppRoute(route);
+
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      return { ok: false, error: "Main window is not available" };
+    }
+
+    try {
+      if (isDev) {
+        await mainWindow.loadURL(`http://localhost:3000${normalizedRoute}`);
+      } else {
+        const routeHtmlPath = resolveStaticRouteHtml(normalizedRoute);
+        if (!routeHtmlPath) {
+          return { ok: false, error: `Route not found: ${normalizedRoute}` };
+        }
+        await mainWindow.loadFile(routeHtmlPath);
+      }
+
+      return { ok: true };
+    } catch (error) {
+      return {
+        ok: false,
+        error: error instanceof Error ? error.message : "Navigation failed",
+      };
+    }
   });
 
   ipcMain.handle("tools:pick-file", async () => {
@@ -695,7 +758,7 @@ app.whenReady().then(() => {
     const language = payload.language || "c";
     const image = payload.image || DEFAULT_IMAGE;
     const platform = payload.platform || DEFAULT_PLATFORM;
-    const resultsDir = payload.resultsDir || DEFAULT_RESULTS_DIR;
+    const resultsDir = payload.resultsDir || configuredResultsDir || DEFAULT_RESULTS_DIR;
     const sourceType = payload.sourceType || "sample";
     const samplePath = payload.samplePath || "";
     const filePath = payload.filePath || "";
@@ -819,7 +882,7 @@ app.whenReady().then(() => {
     const tool = payload.tool || "";
     const image = payload.image || DEFAULT_IMAGE;
     const platform = payload.platform || DEFAULT_PLATFORM;
-    const resultsDir = payload.resultsDir || DEFAULT_RESULTS_DIR;
+    const resultsDir = payload.resultsDir || configuredResultsDir || DEFAULT_RESULTS_DIR;
     const sourceType = payload.sourceType || "sample";
     const samplePath = payload.samplePath || "";
     const filePath = payload.filePath || "";

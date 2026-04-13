@@ -9,6 +9,23 @@ interface SessionCheckModalProps {
   onClose: () => void;
 }
 
+async function navigateToRoute(route: string): Promise<void> {
+  const navigateResult = await window.electronAPI?.navigate?.(route);
+  if (navigateResult?.ok) return;
+
+  if (route === '/') {
+    window.location.href = './';
+    return;
+  }
+
+  if (route === '/tools') {
+    window.location.href = './tools/';
+    return;
+  }
+
+  window.location.href = route;
+}
+
 export function SessionCheckModal({ isOpen, user, onClose }: SessionCheckModalProps) {
   const [userData, setUserData] = useState<any>(null);
   const [lastUpdated, setLastUpdated] = useState<string>('Never');
@@ -34,7 +51,7 @@ export function SessionCheckModal({ isOpen, user, onClose }: SessionCheckModalPr
     sessionStorage.clear();
     onClose();
     // Redirect to login
-    window.location.href = '/';
+    void navigateToRoute('/');
   };
 
   if (!isOpen) return null;

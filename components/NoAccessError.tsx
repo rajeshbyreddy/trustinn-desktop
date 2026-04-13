@@ -92,6 +92,23 @@ function getOrCreateSharedDeviceId(fingerprint: string): string {
   return deviceId;
 }
 
+async function navigateToRoute(route: string): Promise<void> {
+  const navigateResult = await window.electronAPI?.navigate?.(route);
+  if (navigateResult?.ok) return;
+
+  if (route === "/tools") {
+    window.location.href = "./tools/";
+    return;
+  }
+
+  if (route === "/") {
+    window.location.href = "./";
+    return;
+  }
+
+  window.location.href = route;
+}
+
 function parseUserAgent() {
   const ua = typeof navigator !== 'undefined' ? navigator.userAgent : '';
   const browser = ua.includes('Firefox') ? 'Firefox'
@@ -160,7 +177,9 @@ export default function NoAccessError() {
       if (expiryTime > Date.now()) {
         setSessionExpiry(expiryTime);
         setSuccess(true);
-        setTimeout(() => window.location.href = '/tools', 600);
+        setTimeout(() => {
+          void navigateToRoute('/tools');
+        }, 600);
       } else {
         sessionStorage.removeItem('trustinn_token');
         sessionStorage.removeItem('trustinn_user_id');
@@ -212,7 +231,9 @@ export default function NoAccessError() {
     sessionStorage.setItem('trustinn_user', JSON.stringify(data.user));
     setSessionExpiry(expiryTime);
     setSuccess(true);
-    setTimeout(() => window.location.href = '/tools', 800);
+    setTimeout(() => {
+      void navigateToRoute('/tools');
+    }, 800);
   };
 
   const handleLogin = async (e: React.FormEvent) => {

@@ -15,6 +15,7 @@ async function safeInvoke(primaryChannel, payload, fallbackChannel) {
 
 contextBridge.exposeInMainWorld("electronAPI", {
   ping: () => ipcRenderer.invoke("app:ping"),
+  navigate: (route) => ipcRenderer.invoke("app:navigate", route),
   pickFile: () => ipcRenderer.invoke("tools:pick-file"),
   stopRun: () => ipcRenderer.invoke("tools:stop-run"),
   readFile: (filePath) => ipcRenderer.invoke("tools:read-file", filePath),
@@ -38,6 +39,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // Setup event listeners
   onSetupPullingImage: (callback) => ipcRenderer.on("setup:pulling-image", callback),
   onSetupProgress: (callback) => ipcRenderer.on("setup:pull-progress", (_event, progress) => callback(progress)),
+  onSetupStatus: (callback) => ipcRenderer.on("setup:status", (_event, payload) => callback(payload)),
+  onSetupError: (callback) => ipcRenderer.on("setup:error", (_event, payload) => callback(payload)),
+  onSetupWizardStart: (callback) => ipcRenderer.on("setup:wizard-start", callback),
   onSetupComplete: (callback) => ipcRenderer.on("setup:pull-complete", callback),
   
   // Auto-update listeners

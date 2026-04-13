@@ -6,16 +6,41 @@ export function SetupModal() {
   const [isVisible, setIsVisible] = useState(false);
   const [progress, setProgress] = useState(0);
   const [message, setMessage] = useState("Initializing...");
+  const [isError, setIsError] = useState(false);
 
   useEffect(() => {
     // Listen for setup events from Electron main process
-    if (typeof window !== "undefined" && (window as any).electronAPI) {
-      const ipcRenderer = (window as any).electronAPI;
+    if (typeof window !== "undefined" && window.electronAPI) {
 
       const handlePullingImage = () => {
         setIsVisible(true);
+        setIsError(false);
         setProgress(5);
         setMessage("Pulling TrustINN Docker image...");
+      };
+
+      const handleWizardStart = () => {
+        setIsVisible(true);
+        setIsError(false);
+        setProgress(2);
+        setMessage("Starting setup wizard...");
+      };
+
+      const handleStatus = (payload: { message?: string; progress?: number }) => {
+        setIsVisible(true);
+        setIsError(false);
+        if (typeof payload?.progress === "number") {
+          setProgress(Math.max(0, Math.min(100, payload.progress)));
+        }
+        if (payload?.message) {
+          setMessage(payload.message);
+        }
+      };
+
+      const handleError = (payload: { message?: string }) => {
+        setIsVisible(true);
+        setIsError(true);
+        setMessage(payload?.message || "Setup failed. Please try again.");
       };
 
       const handleProgress = (percentage: number) => {
@@ -27,6 +52,7 @@ export function SetupModal() {
 
       const handleComplete = () => {
         setProgress(100);
+        setIsError(false);
         setMessage("Setup complete! Loading application...");
         setTimeout(() => {
           setIsVisible(false);
@@ -34,9 +60,12 @@ export function SetupModal() {
       };
 
       // Subscribe to IPC events
-      (window as any).electronAPI?.onSetupPullingImage?.(handlePullingImage);
-      (window as any).electronAPI?.onSetupProgress?.(handleProgress);
-      (window as any).electronAPI?.onSetupComplete?.(handleComplete);
+      window.electronAPI?.onSetupPullingImage?.(handlePullingImage);
+      window.electronAPI?.onSetupProgress?.(handleProgress);
+      window.electronAPI?.onSetupWizardStart?.(handleWizardStart);
+      window.electronAPI?.onSetupStatus?.(handleStatus);
+      window.electronAPI?.onSetupError?.(handleError);
+      window.electronAPI?.onSetupComplete?.(handleComplete);
 
       return () => {
         // Cleanup listeners
@@ -58,7 +87,7 @@ export function SetupModal() {
             {/* Progress Bar */}
             <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
               <div
-                className="bg-blue-500 h-full transition-all duration-300 ease-out"
+                className={`${isError ? "bg-red-500" : "bg-blue-500"} h-full transition-all duration-300 ease-out`}
                 style={{ width: `${progress}%` }}
               />
             </div>
@@ -68,16 +97,18 @@ export function SetupModal() {
           </div>
 
           <div className="text-sm text-gray-600 text-center">
-            <p>Please wait while we prepare TrustINN for first use.</p>
-            <p className="text-xs text-gray-500 mt-1">This happens only once.</p>
+            <p>Please wait while wizard setup prepares TrustINN.</p>
+            <p className="text-xs text-gray-500 mt-1">Docker check, folder setup, and image pull run here.</p>
           </div>
 
           {/* Animated Dots */}
-          <div className="flex gap-1 justify-center">
-            <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: "0s" }} />
-            <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: "0.15s" }} />
-            <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: "0.3s" }} />
-          </div>
+          {!isError && (
+            <div className="flex gap-1 justify-center">
+              <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: "0s" }} />
+              <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: "0.15s" }} />
+              <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: "0.3s" }} />
+            </div>
+          )}
         </div>
       </div>
     </div>

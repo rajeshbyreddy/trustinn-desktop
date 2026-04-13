@@ -96,6 +96,23 @@ type VeriSolMetrics = {
   runtimeSeconds: number;
 };
 
+async function navigateToRoute(route: string): Promise<void> {
+  const navigateResult = await window.electronAPI?.navigate?.(route);
+  if (navigateResult?.ok) return;
+
+  if (route === "/") {
+    window.location.href = "./";
+    return;
+  }
+
+  if (route === "/tools") {
+    window.location.href = "./tools/";
+    return;
+  }
+
+  window.location.href = route;
+}
+
 function extractMutationReportBlock(output: string): string {
   const raw = (output || "").replace(/\r\n/g, "\n").trim();
   if (!raw) return "";
@@ -1515,7 +1532,7 @@ export default function ToolsContent() {
         <div style={{textAlign: "center"}}>
           <div style={{fontSize: 24, fontWeight: 800, color: "#111827", marginBottom: 8}}>⚠️ Session Expired</div>
           <div style={{fontSize: 14, color: "#6b7280", marginBottom: 20}}>Your session data has been cleared. Please login again to continue.</div>
-          <button onClick={() => window.location.href = "/"} style={{
+          <button onClick={() => void navigateToRoute("/")} style={{
             padding: "10px 20px", background: "linear-gradient(135deg,#6366f1,#8b5cf6)",
             border: "none", borderRadius: 8, color: "#fff", fontSize: 14, fontWeight: 700,
             cursor: "pointer", boxShadow: "0 4px 12px rgba(99,102,241,0.3)",

@@ -8,6 +8,7 @@ declare global {
         platform: string;
         date: string;
       }>;
+      navigate: (route: string) => Promise<{ ok: boolean; error?: string }>;
       pickFile: () => Promise<
         | { ok: true; path: string }
         | { ok: false; canceled?: boolean; error?: string }
@@ -74,6 +75,16 @@ declare global {
         resultsDir?: string;
         error?: string;
       }>;
+      onSetupPullingImage: (callback: () => void) => void;
+      onSetupProgress: (callback: (progress: number) => void) => void;
+      onSetupStatus: (callback: (payload: { message?: string; progress?: number }) => void) => void;
+      onSetupError: (callback: (payload: { message?: string }) => void) => void;
+      onSetupWizardStart: (callback: () => void) => void;
+      onSetupComplete: (callback: () => void) => void;
+      onUpdateAvailable: (callback: (info: unknown) => void) => void;
+      onUpdateProgress: (callback: (progress: unknown) => void) => void;
+      onUpdateDownloaded: (callback: () => void) => void;
+      quitAndInstall: () => Promise<unknown>;
     };
   }
 }
