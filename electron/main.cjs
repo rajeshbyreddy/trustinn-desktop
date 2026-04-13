@@ -377,6 +377,40 @@ function applyLanguageSampleFilters(language, samples) {
   return uniqueByPath.filter((item) => !excluded.has(path.basename(item.path).toLowerCase()));
 }
 
+function countSolidityFiles(folderPath, stopAfter = 11) {
+  let count = 0;
+  const queue = [folderPath];
+
+  while (queue.length > 0) {
+    const currentPath = queue.shift();
+    if (!currentPath) continue;
+
+    let entries = [];
+    try {
+      entries = fs.readdirSync(currentPath, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+
+    for (const entry of entries) {
+      const entryPath = path.join(currentPath, entry.name);
+      if (entry.isDirectory()) {
+        queue.push(entryPath);
+        continue;
+      }
+
+      if (entry.isFile() && entry.name.toLowerCase().endsWith(".sol")) {
+        count += 1;
+        if (count >= stopAfter) {
+          return count;
+        }
+      }
+    }
+  }
+
+  return count;
+}
+
 // Setup auto-updater
 function setupAutoUpdater() {
   if (isDev) {
@@ -560,6 +594,31 @@ app.whenReady().then(() => {
     }
 
     return { ok: true, path: picked.filePaths[0] };
+  });
+
+  ipcMain.handle("tools:pick-folder", async () => {
+    const picked = await dialog.showOpenDialog({
+      properties: ["openDirectory"],
+      title: "Select Solidity Project Folder",
+      buttonLabel: "Use Folder",
+    });
+
+    if (picked.canceled || picked.filePaths.length === 0) {
+      return { ok: false, canceled: true };
+    }
+
+    const folderPath = picked.filePaths[0];
+    const solCount = countSolidityFiles(folderPath, 11);
+
+    if (solCount === 0) {
+      return { ok: false, error: "No .sol files found in selected folder." };
+    }
+
+    if (solCount > 10) {
+      return { ok: false, error: "Maximum 10 .sol files allowed. Please choose a smaller project." };
+    }
+
+    return { ok: true, path: folderPath, solCount };
   });
 
   ipcMain.handle("tools:stop-run", async () => {
@@ -827,6 +886,7 @@ app.whenReady().then(() => {
     const sourceType = payload.sourceType || "sample";
     const samplePath = payload.samplePath || "";
     const filePath = payload.filePath || "";
+    const folderPath = payload.folderPath || "";
     // Longer timeout for Advance Code Coverage Profiler (up to 1 hour)
     const timeoutSeconds = payload.timeoutSeconds || (tool === "Advance Code Coverage Profiler" ? 3600 : 1800);
     const params = paramsForLanguageTool(language, tool, payload.params);
@@ -864,6 +924,13 @@ app.whenReady().then(() => {
       // Mount temp files to /input and pass full path
       args.push("-v", `${getDockerVolumePath(inputDir)}:/input:ro`);
       sampleArg = `/input/${inputName}`;
+    } else if (sourceType === "folder") {
+      if (!folderPath) {
+        return { ok: false, error: "Folder path is required", output: "", command: "" };
+      }
+
+      args.push("-v", `${getDockerVolumePath(folderPath)}:/input/project:ro`);
+      sampleArg = "/input/project";
     }
 
     // Add entrypoint and image

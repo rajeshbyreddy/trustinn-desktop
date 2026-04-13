@@ -20,6 +20,7 @@ const CodeEditor = lazy(() => import("@/components/CodeEditor"));
 
 type Tab = "c" | "java" | "python" | "solidity";
 type InputMode = "file" | "code";
+type SoliditySourceMode = "file" | "folder";
 type ChartType = "pie" | "bar";
 
 type ChartDatum = { name: string; value: number; fill: string };
@@ -855,6 +856,8 @@ export default function ToolsContent() {
   const [selectedLocalFilePath, setSelectedLocalFilePath] = useState<Record<Tab, string>>({
     c: "", java: "", python: "", solidity: "",
   });
+  const [selectedLocalFolderPath, setSelectedLocalFolderPath] = useState("");
+  const [soliditySourceMode, setSoliditySourceMode] = useState<SoliditySourceMode>("file");
   const [isLoadingSamples, setIsLoadingSamples] = useState(false);
   const [sampleModalOpen, setSampleModalOpen] = useState(false);
   const [fileViewerOpen, setFileViewerOpen] = useState(false);
@@ -1011,6 +1014,10 @@ export default function ToolsContent() {
     else setSolidityTool(value);
     setSelectedLocalFilePath((prev) => ({ ...prev, [currentTab]: "" }));
     setSelectedSamplePath((prev) => ({ ...prev, [currentTab]: "" }));
+    if (currentTab === "solidity") {
+      setSelectedLocalFolderPath("");
+      setSoliditySourceMode("file");
+    }
   };
 
   const simulateRunOutput = (tab: Tab, code: string) => {
@@ -1062,8 +1069,30 @@ export default function ToolsContent() {
     const result = await window.electronAPI.pickFile();
     if (!result.ok || !("path" in result)) return;
     setSelectedLocalFilePath((prev) => ({ ...prev, [currentTab]: result.path }));
+    if (currentTab === "solidity") {
+      setSelectedLocalFolderPath("");
+      setSoliditySourceMode("file");
+    }
     setSelectedSamplePath((prev) => ({ ...prev, [currentTab]: "" }));
     mockAppendOutput(currentTab, `✅ Selected: ${getFileName(result.path)}`);
+  };
+
+  const browseSolidityFolder = async () => {
+    if (!window.electronAPI?.pickFolder) return;
+    const result = await window.electronAPI.pickFolder();
+
+    if (!result.ok) {
+      if (result.error) {
+        mockAppendOutput("solidity", `❌ ${result.error}`);
+      }
+      return;
+    }
+
+    setSoliditySourceMode("folder");
+    setSelectedLocalFolderPath(result.path);
+    setSelectedLocalFilePath((prev) => ({ ...prev, solidity: "" }));
+    setSelectedSamplePath((prev) => ({ ...prev, solidity: "" }));
+    mockAppendOutput("solidity", `✅ Selected Solidity folder (${result.solCount} .sol file(s)): ${getFileName(result.path)}`);
   };
 
   const executeCommand = async (type: Tab) => {
@@ -1117,7 +1146,7 @@ export default function ToolsContent() {
     setLoading(true);
 
     // Handle both file mode and code mode
-    let sourceType: "sample" | "file" = "file";
+    let sourceType: "sample" | "file" | "folder" = "file";
     let sourcePath: string | undefined;
 
     if (inputMode === "code") {
@@ -1146,9 +1175,16 @@ export default function ToolsContent() {
     } else {
       // File mode
       const localPath = selectedLocalFilePath[type];
+      const localFolderPath = type === "solidity" ? selectedLocalFolderPath : "";
       const samplePath = selectedSamplePath[type];
-      sourceType = localPath ? "file" : "sample";
-      sourcePath = localPath || samplePath;
+
+      if (type === "solidity" && soliditySourceMode === "folder") {
+        sourceType = "folder";
+        sourcePath = localFolderPath;
+      } else {
+        sourceType = localPath ? "file" : "sample";
+        sourcePath = localPath || samplePath;
+      }
 
       if (!sourcePath) {
         mockAppendOutput(type, "❌ Pick a sample or browse a file first.");
@@ -1157,7 +1193,7 @@ export default function ToolsContent() {
       }
 
       // Validate local file extension matches language
-      if (localPath) {
+      if (localPath && sourceType === "file") {
         const fileExt = localPath.split('.').pop()?.toLowerCase();
         const expectedExtensions: Record<Tab, string> = {
           c: 'c',
@@ -1193,6 +1229,7 @@ export default function ToolsContent() {
         sourceType,
         samplePath: sourceType === "sample" ? sourcePath : undefined,
         filePath: sourceType === "file" ? sourcePath : undefined,
+        folderPath: sourceType === "folder" ? sourcePath : undefined,
         params,
       });
     } catch (error) {
@@ -1365,6 +1402,16 @@ export default function ToolsContent() {
       // File mode - only allow local uploaded files
       const localPath = selectedLocalFilePath[type];
       const samplePath = selectedSamplePath[type];
+
+      if (type === "solidity" && soliditySourceMode === "folder") {
+        if (!selectedLocalFolderPath) {
+          mockAppendOutput(type, "❌ No Solidity folder selected. Please select a folder first.");
+        } else {
+          mockAppendOutput(type, "📁 Solidity folder projects are supported via Execute only.");
+        }
+        setIsCompiling(false);
+        return;
+      }
       
       if (samplePath && !localPath) {
         // Sample files are in Docker container - can only be accessed via Execute
@@ -1794,8 +1841,33 @@ export default function ToolsContent() {
             <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "12px 14px", display: "flex", flexDirection: "column", gap: 9 }}>
               {inputMode === "file" ? (
                 <>
+                  {currentTab === "solidity" && (
+                    <div style={{ display: "flex", gap: 6 }}>
+                      {(["file", "folder"] as SoliditySourceMode[]).map((mode) => (
+                        <button
+                          key={mode}
+                          onClick={() => {
+                            setSoliditySourceMode(mode);
+                            setSelectedSamplePath((prev) => ({ ...prev, solidity: "" }));
+                            setSelectedLocalFilePath((prev) => ({ ...prev, solidity: "" }));
+                            setSelectedLocalFolderPath("");
+                          }}
+                          style={{
+                            ...S.outlineBtn,
+                            flex: 1,
+                            background: soliditySourceMode === mode ? TOKEN.text : TOKEN.bg,
+                            color: soliditySourceMode === mode ? "#fff" : TOKEN.text,
+                            borderColor: soliditySourceMode === mode ? TOKEN.text : TOKEN.border,
+                          }}
+                        >
+                          {mode === "file" ? "📄 File" : "📁 Folder"}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
                   <div
-                    onClick={browseLocalFile}
+                    onClick={currentTab === "solidity" && soliditySourceMode === "folder" ? browseSolidityFolder : browseLocalFile}
                     style={{
                       border: "1.5px dashed #c7d2fe", borderRadius: 10,
                       padding: "16px 12px", textAlign: "center",
@@ -1804,16 +1876,24 @@ export default function ToolsContent() {
                   >
                     <div style={{ fontSize: 20, marginBottom: 4 }}>☁</div>
                     <div style={{ fontSize: 11, color: TOKEN.textSub, marginBottom: 7 }}>
-                      Drag &amp; drop or click to browse
+                      {currentTab === "solidity" && soliditySourceMode === "folder"
+                        ? "Click to select a Solidity folder (.sol files)"
+                        : "Drag &amp; drop or click to browse"}
                     </div>
                     <span style={{ fontSize: 11, color: TOKEN.accent, fontWeight: 700, background: TOKEN.bg, border: `1px solid #c7d2fe`, borderRadius: 6, padding: "4px 14px" }}>
-                      Browse File
+                      {currentTab === "solidity" && soliditySourceMode === "folder" ? "Browse Folder" : "Browse File"}
                     </span>
                   </div>
 
-                  {(selectedLocalFilePath[currentTab] || selectedSamplePath[currentTab]) && (
+                  {(currentTab === "solidity" && soliditySourceMode === "folder"
+                    ? selectedLocalFolderPath
+                    : selectedLocalFilePath[currentTab] || selectedSamplePath[currentTab]) && (
                     <div style={{ padding: "7px 10px", borderRadius: 7, border: `1px solid ${TOKEN.border}`, background: TOKEN.bgSurface, fontSize: 10.5, color: TOKEN.textSub, wordBreak: "break-all" }}>
-                      📄 {getFileName(selectedLocalFilePath[currentTab] || selectedSamplePath[currentTab])}
+                      {currentTab === "solidity" && soliditySourceMode === "folder" ? "📁" : "📄"} {getFileName(
+                        (currentTab === "solidity" && soliditySourceMode === "folder")
+                          ? selectedLocalFolderPath
+                          : (selectedLocalFilePath[currentTab] || selectedSamplePath[currentTab])
+                      )}
                     </div>
                   )}
 
@@ -1823,6 +1903,10 @@ export default function ToolsContent() {
                     </button>
                     <button
                       onClick={async () => {
+                        if (currentTab === "solidity" && soliditySourceMode === "folder") {
+                          mockAppendOutput(currentTab, "ℹ Folder selected. View File works only for single-file inputs.");
+                          return;
+                        }
                         const src = selectedLocalFilePath[currentTab] || selectedSamplePath[currentTab];
                         if (!src) { mockAppendOutput(currentTab, "❌ No file selected."); return; }
                         try {
@@ -2036,6 +2120,10 @@ export default function ToolsContent() {
         onSelect={(sample) => {
           setSelectedSamplePath((prev) => ({ ...prev, [currentTab]: sample.path }));
           setSelectedLocalFilePath((prev) => ({ ...prev, [currentTab]: "" }));
+          if (currentTab === "solidity") {
+            setSelectedLocalFolderPath("");
+            setSoliditySourceMode("file");
+          }
           setSampleModalOpen(false);
           mockAppendOutput(currentTab, `✅ Selected sample: ${sample.name}`);
         }}

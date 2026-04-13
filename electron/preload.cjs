@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   ping: () => ipcRenderer.invoke("app:ping"),
   navigate: (route) => ipcRenderer.invoke("app:navigate", route),
   pickFile: () => ipcRenderer.invoke("tools:pick-file"),
+  pickFolder: () => ipcRenderer.invoke("tools:pick-folder"),
   stopRun: () => ipcRenderer.invoke("tools:stop-run"),
   readFile: (filePath) => ipcRenderer.invoke("tools:read-file", filePath),
   writeTempFile: (content, language) => ipcRenderer.invoke("tools:write-temp-file", { content, language }),

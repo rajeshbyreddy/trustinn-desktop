@@ -13,6 +13,10 @@ declare global {
         | { ok: true; path: string }
         | { ok: false; canceled?: boolean; error?: string }
       >;
+      pickFolder: () => Promise<
+        | { ok: true; path: string; solCount: number }
+        | { ok: false; canceled?: boolean; error?: string }
+      >;
       stopRun: () => Promise<{ ok: boolean; stopped: boolean; error?: string }>;
       readFile: (filePath: string) => Promise<string>;
       writeTempFile: (content: string, language: string) => Promise<string>;
@@ -32,9 +36,10 @@ declare global {
       runTool: (payload: {
         language: "c" | "solidity" | string;
         tool: string;
-        sourceType: "sample" | "file";
+        sourceType: "sample" | "file" | "folder";
         samplePath?: string;
         filePath?: string;
+        folderPath?: string;
         params?: string;
         persistResults?: boolean;
         image?: string;
