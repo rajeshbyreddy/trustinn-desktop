@@ -882,6 +882,12 @@ export default function ToolsContent() {
   const terminalRef = useRef<HTMLDivElement>(null);
   const timerIdsRef = useRef<number[]>([]);
 
+  const logoSrc = useMemo(() => {
+    if (typeof window === "undefined") return "/logo.png";
+    if (window.location.protocol === "file:") return "../logo.png";
+    return "/logo.png";
+  }, []);
+
   // ── Auth check on mount ──────────────────────────────────
   useEffect(() => {
     const checkAuth = async () => {
@@ -1579,7 +1585,7 @@ export default function ToolsContent() {
       >
         <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
           <Image
-            src="/logo.png"
+            src={logoSrc}
             alt="NITMiner logo"
             width={120}
             height={48}

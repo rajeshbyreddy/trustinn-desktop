@@ -169,26 +169,53 @@ export default function NoAccessError() {
   const [duplicateLoading, setDuplicateLoading] = useState(false);
 
   useEffect(() => {
-    try {
-      const storedToken = sessionStorage.getItem('trustinn_token');
-      const storedExpiry = sessionStorage.getItem('token_expires');
-      if (!storedToken || !storedExpiry) return;
-      const expiryTime = new Date(storedExpiry).getTime();
-      if (expiryTime > Date.now()) {
+    const checkSession = async () => {
+      try {
+        const storedToken = sessionStorage.getItem('trustinn_token');
+        const storedExpiry = sessionStorage.getItem('token_expires');
+        if (!storedToken || !storedExpiry) return;
+
+        const expiryTime = new Date(storedExpiry).getTime();
+        if (!Number.isFinite(expiryTime) || expiryTime <= Date.now()) {
+          sessionStorage.removeItem('trustinn_token');
+          sessionStorage.removeItem('trustinn_user_id');
+          sessionStorage.removeItem('token_expires');
+          sessionStorage.removeItem('trustinn_user');
+          return;
+        }
+
+        let isValidToken = false;
+        try {
+          const response = await fetch('/api/auth/validate-token', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token: storedToken }),
+          });
+          const data = await response.json();
+          isValidToken = Boolean(response.ok && data?.isValid);
+        } catch (validateError) {
+          console.error('Token validation request failed:', validateError);
+        }
+
+        if (!isValidToken) {
+          sessionStorage.removeItem('trustinn_token');
+          sessionStorage.removeItem('trustinn_user_id');
+          sessionStorage.removeItem('token_expires');
+          sessionStorage.removeItem('trustinn_user');
+          return;
+        }
+
         setSessionExpiry(expiryTime);
         setSuccess(true);
         setTimeout(() => {
           void navigateToRoute('/tools');
         }, 600);
-      } else {
-        sessionStorage.removeItem('trustinn_token');
-        sessionStorage.removeItem('trustinn_user_id');
-        sessionStorage.removeItem('token_expires');
-        sessionStorage.removeItem('trustinn_user');
+      } catch (err) {
+        console.error('Error checking session:', err);
       }
-    } catch (err) {
-      console.error('Error checking session:', err);
-    }
+    };
+
+    void checkSession();
   }, []);
 
   const getRemainingTime = () => {

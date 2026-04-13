@@ -36,6 +36,7 @@ declare global {
         samplePath?: string;
         filePath?: string;
         params?: string;
+        persistResults?: boolean;
         image?: string;
         platform?: string;
         resultsDir?: string;
@@ -64,6 +65,7 @@ declare global {
         samplePath?: string;
         filePath?: string;
         params?: string;
+        persistResults?: boolean;
         image?: string;
         platform?: string;
         resultsDir?: string;

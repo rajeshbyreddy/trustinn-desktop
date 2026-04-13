@@ -11,6 +11,7 @@ const isDev = !app.isPackaged;
 const DEFAULT_IMAGE = process.env.TRUSTINN_IMAGE || "rajeshbyreddy95/trustinn-tools:4.1.2";
 const DEFAULT_PLATFORM = process.env.TRUSTINN_PLATFORM || "linux/amd64";
 const DEFAULT_RESULTS_DIR = process.env.TRUSTINN_RESULTS_DIR || path.join(os.homedir(), "Downloads", "TrustinnDownloads");
+const PERSIST_RESULTS_DEFAULT = process.env.TRUSTINN_PERSIST_RESULTS === "1";
 const IS_MAC = process.platform === "darwin";
 const IS_WIN = process.platform === "win32";
 let activeToolProcess = null;
@@ -600,16 +601,26 @@ app.whenReady().then(() => {
       
       // If it's a Docker path (starts with /workspace), read from Docker
       if (filePath.startsWith("/workspace")) {
-        const image = "rajeshbyreddy95/trustinn-tools:3.1.4";
+        const image = DEFAULT_IMAGE;
+        const targetPath = filePath.replace(/"/g, '\\"');
         const args = [
           "run",
-          "--platform", "linux/amd64",
+          "--platform", DEFAULT_PLATFORM,
           "--rm",
-          "-v", "/tmp/trustinn-code:/workspace/temp-input:ro",
           "--entrypoint", "sh",
           image,
-          "-c",
-          `cat "${filePath}"`
+          "-lc",
+          [
+            `TARGET=\"${targetPath}\"`,
+            "if [ -f \"$TARGET\" ]; then cat \"$TARGET\"; exit 0; fi",
+            "NAME=$(basename \"$TARGET\")",
+            "for ROOT in /workspace /opt/trustinn /opt; do",
+            "  FOUND=$(find \"$ROOT\" -type f -name \"$NAME\" 2>/dev/null | head -n 1)",
+            "  if [ -n \"$FOUND\" ]; then cat \"$FOUND\"; exit 0; fi",
+            "done",
+            "echo \"File not found inside docker image: $TARGET\" >&2",
+            "exit 1",
+          ].join("; "),
         ];
         
         try {
@@ -812,6 +823,7 @@ app.whenReady().then(() => {
     const image = payload.image || DEFAULT_IMAGE;
     const platform = payload.platform || DEFAULT_PLATFORM;
     const resultsDir = payload.resultsDir || configuredResultsDir || DEFAULT_RESULTS_DIR;
+    const persistResults = payload.persistResults ?? PERSIST_RESULTS_DEFAULT;
     const sourceType = payload.sourceType || "sample";
     const samplePath = payload.samplePath || "";
     const filePath = payload.filePath || "";
@@ -834,9 +846,13 @@ app.whenReady().then(() => {
       "-m", "4g",  // Allow up to 4GB memory
     ];
 
-    // Add volume mounts
-    // Mount results directory only (samples come from Docker image)
-    args.push("-v", `${getDockerVolumePath(resultsDir)}:/results`);
+    // Keep results ephemeral by default to avoid writing into user machine storage.
+    // Set TRUSTINN_PERSIST_RESULTS=1 or payload.persistResults=true to persist host-side reports.
+    if (persistResults) {
+      args.push("-v", `${getDockerVolumePath(resultsDir)}:/results`);
+    } else {
+      args.push("--tmpfs", "/results:rw,nosuid,nodev,size=1073741824");
+    }
 
     if (sourceType === "file") {
       if (!filePath) {
@@ -936,6 +952,7 @@ app.whenReady().then(() => {
     const image = payload.image || DEFAULT_IMAGE;
     const platform = payload.platform || DEFAULT_PLATFORM;
     const resultsDir = payload.resultsDir || configuredResultsDir || DEFAULT_RESULTS_DIR;
+    const persistResults = payload.persistResults ?? PERSIST_RESULTS_DEFAULT;
     const sourceType = payload.sourceType || "sample";
     const samplePath = payload.samplePath || "";
     const filePath = payload.filePath || "";
@@ -958,9 +975,13 @@ app.whenReady().then(() => {
       "-m", "4g",  // Allow up to 4GB memory
     ];
 
-    // Add volume mounts
-    // Mount results directory only (samples come from Docker image)
-    args.push("-v", `${getDockerVolumePath(resultsDir)}:/results`);
+    // Keep results ephemeral by default to avoid writing into user machine storage.
+    // Set TRUSTINN_PERSIST_RESULTS=1 or payload.persistResults=true to persist host-side reports.
+    if (persistResults) {
+      args.push("-v", `${getDockerVolumePath(resultsDir)}:/results`);
+    } else {
+      args.push("--tmpfs", "/results:rw,nosuid,nodev,size=1073741824");
+    }
 
     if (sourceType === "file") {
       if (!filePath) {
