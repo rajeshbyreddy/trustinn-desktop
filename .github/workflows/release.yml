@@ -1,7 +1,8 @@
-name: Build macOS DMG
+name: 🚀 Release Build (macOS + Windows)
 
 permissions:
   contents: write
+  packages: write
 
 on:
   push:
@@ -9,10 +10,54 @@ on:
       - 'v*'
       - '*.*.*'
   workflow_dispatch:
+    inputs:
+      release_notes:
+        description: 'Custom release notes (optional)'
+        required: false
+        default: ''
 
 jobs:
+  verify:
+    name: 📋 Verify Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "✅ Building version: $VERSION"
+
+      - name: Validate package.json version matches tag
+        run: |
+          PKG_VERSION=$(node -e "console.log(require('./package.json').version)")
+          TAG_VERSION=${{ steps.version.outputs.version }}
+          # Trim 'v' prefix if present
+          TAG_VERSION=${TAG_VERSION#v}
+          if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
+            echo "❌ Version mismatch: package.json=$PKG_VERSION, tag=$TAG_VERSION"
+            exit 1
+          fi
+          echo "✅ Version verified: $PKG_VERSION"
+
+      - name: Generate changelog summary
+        id: changelog
+        run: |
+          echo "changelog=Automated build from tag ${{ github.ref }}" >> $GITHUB_OUTPUT
+
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      changelog: ${{ steps.changelog.outputs.changelog }}
+
   build-mac:
+    name: 🍎 Build macOS DMG
     runs-on: macos-latest
+    needs: verify
     defaults:
       run:
         working-directory: .
@@ -28,14 +73,37 @@ jobs:
           cache: 'npm'
           cache-dependency-path: ./package-lock.json
 
-      - name: Install dependencies (trustinn-desktop)
-        run: npm ci
+      - name: Install dependencies
+        run: npm ci --prefer-offline
+
+      - name: Lint check
+        run: npm run lint --if-present
+        continue-on-error: true
+
+      - name: TypeScript check
+        run: npx tsc --noEmit
+        continue-on-error: true
 
       - name: Generate macOS icon
         run: npm run generate:icon
 
+      - name: Build Next.js
+        run: npm run build
+
       - name: Build macOS DMG
         run: npm run build:mac:dmg
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      - name: Verify DMG artifact
+        run: |
+          if [ -f "dist/trustinn-desktop-"*.dmg ]; then
+            echo "✅ DMG created successfully"
+            ls -lh dist/*.dmg
+          else
+            echo "❌ DMG build failed"
+            exit 1
+          fi
 
       - name: Upload DMG to Release
         if: startsWith(github.ref, 'refs/tags/')
@@ -45,21 +113,35 @@ jobs:
             dist/**/*.dmg
             dist/**/*.zip
           draft: false
-          prerelease: false
+          prerelease: ${{ contains(github.ref, '-rc') || contains(github.ref, '-beta') }}
+          body: |
+            ## macOS DMG Release
+            **Version:** ${{ needs.verify.outputs.version }}
+            **Date:** $(date -u +'%Y-%m-%d %H:%M:%S UTC')
+            
+            ### What's New
+            ${{ github.event.inputs.release_notes || needs.verify.outputs.changelog }}
+            
+            ### Installation
+            1. Download the `.dmg` file
+            2. Open and drag TrustInn to Applications
+            3. Launch from Applications folder
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload artifacts
+      - name: Upload macOS artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: macos-dmg
+          name: macos-dmg-${{ needs.verify.outputs.version }}
           path: |
             dist/*.dmg
             dist/*.zip
           retention-days: 30
 
   build-win:
+    name: 🪟 Build Windows Installer
     runs-on: windows-latest
+    needs: verify
 
     steps:
       - name: Checkout code
@@ -71,13 +153,37 @@ jobs:
           node-version: '22'
           cache: 'npm'
 
-      - name: Install dependencies (trustinn-desktop)
-        run: npm ci
+      - name: Install dependencies
+        run: npm ci --prefer-offline
 
-      - name: Build Windows installer
+      - name: Lint check
+        run: npm run lint --if-present
+        continue-on-error: true
+
+      - name: TypeScript check
+        run: npx tsc --noEmit
+        continue-on-error: true
+
+      - name: Build Next.js
+        run: npm run build
+
+      - name: Build Windows installer (.exe)
         run: npm run build:win
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
 
-      - name: Upload Windows assets to Release
+      - name: Verify EXE artifact
+        run: |
+          $exeFile = Get-ChildItem -Path "dist" -Filter "*.exe" -ErrorAction SilentlyContinue
+          if ($exeFile) {
+            Write-Host "✅ EXE created successfully"
+            Get-ChildItem -Path "dist/*.exe" | ForEach-Object { Write-Host $_.FullName, $_.Length }
+          } else {
+            Write-Host "❌ EXE build failed"
+            exit 1
+          }
+
+      - name: Upload Windows to Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v1
         with:
@@ -86,17 +192,69 @@ jobs:
             dist/*.blockmap
             dist/latest*.yml
           draft: false
-          prerelease: false
+          prerelease: ${{ contains(github.ref, '-rc') || contains(github.ref, '-beta') }}
+          body: |
+            ## Windows Installer Release
+            **Version:** ${{ needs.verify.outputs.version }}
+            **Date:** $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss UTC')
+            
+            ### What's New
+            ${{ github.event.inputs.release_notes || needs.verify.outputs.changelog }}
+            
+            ### Installation
+            1. Download the `.exe` file
+            2. Run the installer
+            3. Follow the setup wizard
+            4. Launch TrustInn from Start Menu
+            
+            ### System Requirements
+            - Windows 10 or later
+            - 4GB RAM minimum
+            - Docker Desktop installed
           fail_on_unmatched_files: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload artifacts
+      - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: windows-installer
+          name: windows-installer-${{ needs.verify.outputs.version }}
           path: |
             dist/*.exe
             dist/*.blockmap
             dist/latest*.yml
           retention-days: 30
+
+  finalize:
+    name: ✅ Finalize Release
+    runs-on: ubuntu-latest
+    needs: [verify, build-mac, build-win]
+    if: always()
+    steps:
+      - name: Check build status
+        run: |
+          echo "📦 Release Build Complete"
+          echo "Version: ${{ needs.verify.outputs.version }}"
+          echo "macOS: ${{ needs.build-mac.result }}"
+          echo "Windows: ${{ needs.build-win.result }}"
+          
+          if [ "${{ needs.build-mac.result }}" == "failure" ] || [ "${{ needs.build-win.result }}" == "failure" ]; then
+            echo "⚠️ One or more builds failed"
+            exit 1
+          fi
+          echo "✅ All builds succeeded!"
+
+      - name: Create deployment status
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.repos.createDeployment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: context.ref,
+              environment: 'production',
+              auto_merge: false,
+              required_contexts: [],
+              description: 'Release ${{ needs.verify.outputs.version }} deployed'
+            }).catch(err => console.log('Deployment status skipped'))
+
