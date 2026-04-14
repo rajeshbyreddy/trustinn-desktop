@@ -833,6 +833,7 @@ export default function ToolsContent() {
   const [authLoading, setAuthLoading] = useState(true);
   const [userData, setUserData] = useState<any>(null);
   const [showSessionModal, setShowSessionModal] = useState(false);
+  const [trialsExhausted, setTrialsExhausted] = useState(false);
   
   // Docker image setup state
   const [showImageSetupModal, setShowImageSetupModal] = useState(false);
@@ -841,7 +842,7 @@ export default function ToolsContent() {
   const DOCKER_IMAGE_NAME = "rajeshbyreddy95/trustinn-tools:latest";
   
   
-  // Validate token and check trial/premium eligibility
+  // Validate token and check trial/premium eligibility (REAL-TIME from backend)
   const validateTokenAndCheckEligibility = async (type: Tab, onError: (msg: string) => void): Promise<boolean> => {
     try {
       const token = sessionStorage.getItem("trustinn_token");
@@ -879,6 +880,26 @@ export default function ToolsContent() {
       // Update sessionStorage with fresh user data from backend
       sessionStorage.setItem("trustinn_user", JSON.stringify(data.data));
       console.log("[EXEC] Updated sessionStorage with fresh user data");
+
+      // ✅ CRITICAL: If user has 0 trials and not premium, block ALL operations
+      if (trialCount === 0 && !isPremium) {
+        console.log("[EXEC] User not eligible - no trials and not premium");
+        setTrialsExhausted(true);  // ← Update UI immediately
+        onError("❌ You don't have any trials remaining. Please upgrade to premium to continue.");
+        
+        // Remove Docker image immediately if user has exhausted trials
+        try {
+          console.log("[EXEC] Removing Docker image due to trial exhaustion");
+          const removeResult = await window.electronAPI?.removeDockerImage?.(DOCKER_IMAGE_NAME);
+          if (removeResult?.ok) {
+            console.log("[EXEC] Docker image removed successfully");
+          }
+        } catch (error) {
+          console.warn("[EXEC] Failed to remove Docker image:", error);
+        }
+        
+        return false;
+      }
 
       // User can execute if they have trials OR are premium
       if (trialCount > 0 || isPremium) {
@@ -988,6 +1009,7 @@ export default function ToolsContent() {
       // If trials reached 0 and user is not premium, remove Docker image
       if (trialCount === 0 && !isPremium) {
         console.log("[TRIAL] Trials exhausted and user not premium. Removing Docker image...");
+        setTrialsExhausted(true);  // ← Update UI immediately
         try {
           const removeResult = await window.electronAPI?.removeDockerImage?.(DOCKER_IMAGE_NAME);
           if (removeResult?.ok) {
@@ -1110,6 +1132,14 @@ export default function ToolsContent() {
           try {
             const parsedUser = JSON.parse(userStr);
             setUserData(parsedUser);
+            
+            // ✅ Check if trials are already exhausted
+            if (parsedUser.trialCount === 0 && !parsedUser.isPremium) {
+              console.log("[ToolsContent] User has exhausted trials and no premium");
+              setTrialsExhausted(true);
+            } else {
+              setTrialsExhausted(false);
+            }
           } catch (e) {
             console.error("[ToolsContent] Failed to parse user data:", e);
           }
@@ -1277,9 +1307,10 @@ export default function ToolsContent() {
   };
 
   const browseLocalFile = async () => {
-    // Validate trial/premium eligibility before browsing files
+    // ✅ Validate eligibility BEFORE allowing file selection
     const isEligible = await validateTokenAndCheckEligibility(currentTab, (msg: string) => mockAppendOutput(currentTab, msg));
     if (!isEligible) {
+      mockAppendOutput(currentTab, "❌ Cannot proceed: trials exhausted or session invalid.");
       return;
     }
 
@@ -1299,9 +1330,10 @@ export default function ToolsContent() {
   };
 
   const browseSolidityFolder = async () => {
-    // Validate trial/premium eligibility before browsing folders
+    // ✅ Validate eligibility BEFORE allowing folder selection
     const isEligible = await validateTokenAndCheckEligibility("solidity", (msg: string) => mockAppendOutput("solidity", msg));
     if (!isEligible) {
+      mockAppendOutput("solidity", "❌ Cannot proceed: trials exhausted or session invalid.");
       return;
     }
 
@@ -1898,6 +1930,45 @@ export default function ToolsContent() {
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 99px; }
       `}</style>
+
+      {/* ── Trial Exhaustion Warning ── */}
+      {trialsExhausted && (
+        <div style={{
+          background: "linear-gradient(135deg, #dc2626, #b91c1c)",
+          border: "1px solid #991b1b",
+          borderRadius: 12,
+          padding: "12px 16px",
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          color: "#fff",
+          fontWeight: 600,
+          flexShrink: 0,
+        }}>
+          <span style={{ fontSize: 20 }}>⚠️</span>
+          <div style={{ flex: 1 }}>
+            <div>No trials remaining</div>
+            <div style={{ fontSize: 12, fontWeight: 400, marginTop: 2, opacity: 0.9 }}>
+              Upgrade to premium to continue using tools. Docker image has been removed.
+            </div>
+          </div>
+          <button
+            onClick={() => void navigateToRoute("/pricing")}
+            style={{
+              background: "#fff",
+              color: "#dc2626",
+              border: "none",
+              borderRadius: 6,
+              padding: "6px 12px",
+              fontSize: 12,
+              fontWeight: 700,
+              cursor: "pointer",
+            }}
+          >
+            Upgrade
+          </button>
+        </div>
+      )}
 
       {/* ── Header ── */}
       <header
