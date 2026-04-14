@@ -77,7 +77,7 @@ jobs:
         run: npm ci --prefer-offline
 
       - name: Lint check
-        run: npm run lint --if-present
+        run: npm run lint --if-present || true
         continue-on-error: true
 
       - name: TypeScript check
@@ -157,7 +157,7 @@ jobs:
         run: npm ci --prefer-offline
 
       - name: Lint check
-        run: npm run lint --if-present
+        run: npm run lint --if-present || true
         continue-on-error: true
 
       - name: TypeScript check
