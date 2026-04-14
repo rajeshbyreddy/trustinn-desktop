@@ -7,8 +7,15 @@ const path = require("path");
 const { autoUpdater } = require("electron-updater");
 const setupDocker = require("./setup-docker.cjs");
 
+function normalizeAppRoute(route) {
+  if (typeof route !== "string") return "/";
+  const trimmed = route.trim();
+  if (!trimmed || trimmed === "/") return "/";
+  return trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
+}
+
 const isDev = !app.isPackaged;
-const DEFAULT_IMAGE = process.env.TRUSTINN_IMAGE || "rajeshbyreddy95/trustinn-tools:4.1.2";
+const DEFAULT_IMAGE = process.env.TRUSTINN_IMAGE || "rajeshbyreddy95/trustinn-tools:latest";
 const DEFAULT_PLATFORM = process.env.TRUSTINN_PLATFORM || "linux/amd64";
 const DEFAULT_RESULTS_DIR = process.env.TRUSTINN_RESULTS_DIR || path.join(os.homedir(), "Downloads", "TrustinnDownloads");
 const PERSIST_RESULTS_DEFAULT = process.env.TRUSTINN_PERSIST_RESULTS === "1";
@@ -28,11 +35,14 @@ try {
   console.warn("[SETUP] Failed to read startup config:", error instanceof Error ? error.message : String(error));
 }
 
-function normalizeAppRoute(route) {
-  if (typeof route !== "string") return "/";
-  const trimmed = route.trim();
-  if (!trimmed || trimmed === "/") return "/";
-  return trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
+function getFileExtension(language) {
+  switch (language) {
+    case "java": return "java";
+    case "python": return "py";
+    case "c": return "c";
+    case "solidity": return "sol";
+    default: return "txt";
+  }
 }
 
 function resolveStaticRouteHtml(route) {
@@ -125,6 +135,7 @@ function getDockerVolumePath(hostPath) {
 function runProcess(command, args, options = {}) {
   const trackProcess = Boolean(options.trackProcess);
   const commandTimeout = options.commandTimeout || 0; // 0 = no timeout
+  const onData = options.onData; // callback for live output
 
   return new Promise((resolve, reject) => {
     const proc = spawn(command, args, {
@@ -137,6 +148,7 @@ function runProcess(command, args, options = {}) {
       activeToolProcess = proc;
     }
 
+    const MAX_OUTPUT_SIZE = 10 * 1024 * 1024; // 10MB limit to prevent string length errors
     let stdout = "";
     let stderr = "";
     let stdoutChunks = 0;
@@ -146,7 +158,17 @@ function runProcess(command, args, options = {}) {
     proc.stdout.on("data", (chunk) => {
       hasData = true;
       stdoutChunks++;
-      stdout += String(chunk);
+      const chunkStr = String(chunk);
+      if (stdout.length + chunkStr.length <= MAX_OUTPUT_SIZE) {
+        stdout += chunkStr;
+      } else if (stdout.length < MAX_OUTPUT_SIZE) {
+        stdout += chunkStr.substring(0, MAX_OUTPUT_SIZE - stdout.length);
+        stdout += '\n[Output truncated due to size limit]';
+      }
+      // Send live output if callback provided
+      if (onData) {
+        onData('stdout', chunkStr);
+      }
       // Log first chunk for ACCP
       if (stdoutChunks === 1 && stdout.includes("NITMiner Technologies")) {
         console.log(`[DEBUG] First stdout chunk received for ACCP tool`);
@@ -156,7 +178,17 @@ function runProcess(command, args, options = {}) {
     proc.stderr.on("data", (chunk) => {
       hasData = true;
       stderrChunks++;
-      stderr += String(chunk);
+      const chunkStr = String(chunk);
+      if (stderr.length + chunkStr.length <= MAX_OUTPUT_SIZE) {
+        stderr += chunkStr;
+      } else if (stderr.length < MAX_OUTPUT_SIZE) {
+        stderr += chunkStr.substring(0, MAX_OUTPUT_SIZE - stderr.length);
+        stderr += '\n[Output truncated due to size limit]';
+      }
+      // Send live output if callback provided
+      if (onData) {
+        onData('stderr', chunkStr);
+      }
     });
 
     proc.on("exit", (code, signal) => {
@@ -222,7 +254,7 @@ function showDockerErrorModal() {
       message = "The path is not shared with Docker. Please configure file sharing:\n\n1. Open Docker Desktop\n2. Go to Preferences → Resources → File Sharing\n3. Add the '/Users' directory\n4. Click Apply and Restart\n\nThen try again.";
     }
     
-    dialog.showErrorDialog(mainWindow, title, message);
+    dialog.showErrorBox(title, message);
   }
 }
 
@@ -479,7 +511,7 @@ async function initializeDockerSetup() {
     
     if (!result.success) {
       console.error("[SETUP] Docker setup failed:", result.error);
-      dialog.showErrorDialog("Setup Error", result.error || "Failed to initialize Docker");
+      dialog.showErrorBox("Setup Error", result.error || "Failed to initialize Docker");
       return false;
     }
 
@@ -519,7 +551,14 @@ function createMainWindow() {
   registerStaticAssetRewrite(mainWindow.webContents.session);
 
   if (isDev) {
-    mainWindow.loadURL("http://localhost:3000");
+    // Load static export files in development for better Electron compatibility
+    const indexPath = resolveStaticRouteHtml("/");
+    if (indexPath) {
+      mainWindow.loadFile(indexPath);
+    } else {
+      console.error("[MAIN] Could not find static index.html in development mode");
+      mainWindow.loadURL("http://localhost:3000"); // fallback
+    }
     mainWindow.webContents.openDevTools({ mode: "detach" });
   } else {
     const indexPath = resolveStaticRouteHtml("/");
@@ -565,7 +604,13 @@ app.whenReady().then(() => {
 
     try {
       if (isDev) {
-        await mainWindow.loadURL(`http://localhost:3000${normalizedRoute}`);
+        // Use static files in dev mode for better compatibility
+        const routeHtmlPath = resolveStaticRouteHtml(normalizedRoute);
+        if (routeHtmlPath) {
+          await mainWindow.loadFile(routeHtmlPath);
+        } else {
+          return { ok: false, error: `Route not found: ${normalizedRoute}` };
+        }
       } else {
         const routeHtmlPath = resolveStaticRouteHtml(normalizedRoute);
         if (!routeHtmlPath) {
@@ -586,7 +631,10 @@ app.whenReady().then(() => {
   ipcMain.handle("tools:pick-file", async () => {
     const picked = await dialog.showOpenDialog({
       properties: ["openFile"],
-      filters: [{ name: "Source Files", extensions: ["c", "h", "i", "txt", "*"] }],
+      filters: [
+        { name: "Source Files", extensions: ["c", "h", "i", "java", "py", "sol", "txt"] },
+        { name: "All Files", extensions: ["*"] },
+      ],
     });
 
     if (picked.canceled || picked.filePaths.length === 0) {
@@ -668,18 +716,24 @@ app.whenReady().then(() => {
           "--rm",
           "--entrypoint", "sh",
           image,
-          "-lc",
-          [
-            `TARGET=\"${targetPath}\"`,
-            "if [ -f \"$TARGET\" ]; then cat \"$TARGET\"; exit 0; fi",
-            "NAME=$(basename \"$TARGET\")",
-            "for ROOT in /workspace /opt/trustinn /opt; do",
-            "  FOUND=$(find \"$ROOT\" -type f -name \"$NAME\" 2>/dev/null | head -n 1)",
-            "  if [ -n \"$FOUND\" ]; then cat \"$FOUND\"; exit 0; fi",
-            "done",
-            "echo \"File not found inside docker image: $TARGET\" >&2",
-            "exit 1",
-          ].join("; "),
+          "-c",
+          `
+TARGET="${targetPath}"
+if [ -f "$TARGET" ]; then
+  cat "$TARGET"
+  exit 0
+fi
+NAME=$(basename "$TARGET")
+for ROOT in /workspace /opt/trustinn /opt; do
+  FOUND=$(find "$ROOT" -type f -name "$NAME" 2>/dev/null | head -n 1)
+  if [ -n "$FOUND" ]; then
+    cat "$FOUND"
+    exit 0
+  fi
+done
+echo "File not found inside docker image: $TARGET" >&2
+exit 1
+          `.trim(),
         ];
         
         try {
@@ -891,11 +945,97 @@ app.whenReady().then(() => {
     const timeoutSeconds = payload.timeoutSeconds || (tool === "Advance Code Coverage Profiler" ? 3600 : 1800);
     const params = paramsForLanguageTool(language, tool, payload.params);
 
-    if (!tool) {
+    // Skip tool requirement for code execution
+    if (sourceType !== "code" && !tool) {
       return { ok: false, error: "Tool is required", output: "", command: "" };
     }
 
     fs.mkdirSync(resultsDir, { recursive: true });
+
+    // Handle code execution/compilation
+    if (sourceType === "code") {
+      const codeContent = payload.codeContent || "";
+      if (!codeContent.trim()) {
+        return { ok: false, error: "No code provided", output: "", command: "" };
+      }
+
+      const tempDir = path.join(os.tmpdir(), "trustinn-code");
+      fs.mkdirSync(tempDir, { recursive: true });
+      const tempFileName = `code_${Date.now()}.${getFileExtension(language)}`;
+      const tempFilePath = path.join(tempDir, tempFileName);
+      fs.writeFileSync(tempFilePath, codeContent);
+
+      if (payload.compile) {
+        // Execute the code
+        let command = "";
+        let args = [];
+        let compileCommand = "";
+        let compileArgs = [];
+        try {
+          if (language === "java") {
+            compileCommand = "javac";
+            compileArgs = [tempFilePath];
+            const compileResult = await runProcess(compileCommand, compileArgs, {});
+            if (compileResult.code !== 0) {
+              fs.unlinkSync(tempFilePath);
+              return { ok: false, output: compileResult.stderr, error: "Compilation failed", command: `${compileCommand} ${compileArgs.join(" ")}` };
+            }
+            // Extract class name from code
+            const classMatch = codeContent.match(/public\s+class\s+(\w+)/);
+            const className = classMatch ? classMatch[1] : "Program";
+            command = "java";
+            args = ["-cp", tempDir, className];
+          } else if (language === "python") {
+            command = "python3";
+            args = [tempFilePath];
+          } else if (language === "c") {
+            const exePath = tempFilePath.replace(/\.c$/, "");
+            compileCommand = "gcc";
+            compileArgs = [tempFilePath, "-o", exePath];
+            const compileResult = await runProcess(compileCommand, compileArgs, {});
+            if (compileResult.code !== 0) {
+              fs.unlinkSync(tempFilePath);
+              return { ok: false, output: compileResult.stderr, error: "Compilation failed", command: `${compileCommand} ${compileArgs.join(" ")}` };
+            }
+            command = exePath;
+            args = [];
+          } else {
+            fs.unlinkSync(tempFilePath);
+            return { ok: false, error: "Code execution not supported for this language", output: "" };
+          }
+
+          const result = await runProcess(command, args, { 
+            commandTimeout: 10000, // 10 second timeout to prevent infinite loops
+            onData: (stream, data) => {
+              if (mainWindow) {
+                mainWindow.webContents.send('code-output-live', { language, stream, data });
+              }
+            }
+          });
+          
+          // Cleanup
+          fs.unlinkSync(tempFilePath);
+          if (language === "java") {
+            const classFile = path.join(tempDir, `${className}.class`);
+            if (fs.existsSync(classFile)) fs.unlinkSync(classFile);
+          } else if (language === "c") {
+            const exePath = tempFilePath.replace(/\.c$/, "");
+            if (fs.existsSync(exePath)) fs.unlinkSync(exePath);
+          }
+
+          return { ok: result.code === 0, output: "", error: result.stderr, command: `${command} ${args.join(" ")}` };
+        } catch (error) {
+          // Cleanup on error
+          if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
+          return { ok: false, error: "Execution failed", output: "" };
+        }
+      } else {
+        // Run analysis tool on the temp file
+        filePath = tempFilePath;
+        sourceType = "file";
+        // Continue to file handling below
+      }
+    }
 
     let sampleArg = samplePath;
     const args = [
@@ -925,22 +1065,109 @@ app.whenReady().then(() => {
       args.push("-v", `${getDockerVolumePath(inputDir)}:/input:ro`);
       sampleArg = `/input/${inputName}`;
     } else if (sourceType === "folder") {
-      if (!folderPath) {
+      console.log("[MAIN] Folder mode - folderPath:", folderPath, "trimmed:", folderPath?.trim());
+      const dockerPath = getDockerVolumePath(folderPath);
+      console.log("[MAIN] Docker volume path:", dockerPath);
+      console.log("[MAIN] Docker mount command: -v", `${dockerPath}:/input/project:ro`);
+      if (!folderPath || !folderPath.trim()) {
         return { ok: false, error: "Folder path is required", output: "", command: "" };
       }
 
-      args.push("-v", `${getDockerVolumePath(folderPath)}:/input/project:ro`);
-      sampleArg = "/input/project";
+      args.push("-v", `${dockerPath}:/input/project:ro`);
+      
+      // For Solidity folders, analyze all .sol files
+      if (language === "solidity") {
+        console.log("[MAIN] Solidity folder mode - will analyze all .sol files in folder");
+        // Don't set sampleArg here, will handle in execution
+      } else {
+        sampleArg = "/input/project";
+      }
     }
 
     // Add entrypoint and image
     args.push("--entrypoint", "python3", image, "/opt/trustinn/runner.py", "run-tool");
 
+    // For Solidity folders, run on each .sol file
+    if (language === "solidity" && sourceType === "folder") {
+      try {
+        const fs = require("fs");
+        const solFiles = fs.readdirSync(folderPath).filter(file => file.endsWith('.sol'));
+        if (solFiles.length === 0) {
+          return { ok: false, error: "No .sol files found in folder", output: "", command: "" };
+        }
+
+        console.log(`[MAIN] Found ${solFiles.length} Solidity files:`, solFiles);
+
+        // Run VeriSol on each .sol file and combine outputs
+        const allOutputs = [];
+        const allCommands = [];
+        let overallOk = true;
+
+        for (const solFile of solFiles) {
+          const fileSampleArg = `/input/project/${solFile}`;
+          const fileArgs = [
+            "run",
+            "--platform", platform,
+            "--rm",
+            "-m", "4g"
+          ];
+
+          // Add results volume if persisting
+          if (persistResults) {
+            fileArgs.push("-v", `${getDockerVolumePath(resultsDir)}:/results`);
+          } else {
+            fileArgs.push("--tmpfs", "/results:rw,nosuid,nodev,size=1073741824");
+          }
+
+          // Add input volume
+          fileArgs.push("-v", `${getDockerVolumePath(folderPath)}:/input/project:ro`);
+
+          // Add entrypoint and tool args
+          fileArgs.push(
+            "--entrypoint", "python3", image, "/opt/trustinn/runner.py", "run-tool",
+            "--language", "solidity",
+            "--tool", "VeriSol",
+            "--sample", fileSampleArg,
+            "--params", params
+          );
+
+          const fileCommand = `docker ${fileArgs.join(" ")}`;
+          allCommands.push(fileCommand);
+
+          console.log(`[MAIN] Running VeriSol on ${solFile}`);
+
+          const fileResult = await runProcess("docker", fileArgs, { trackProcess: true, commandTimeout: timeoutSeconds * 1000 });
+          
+          if (fileResult.code !== 0) {
+            overallOk = false;
+          }
+
+          const fileOutput = `${fileResult.stdout || ""}${fileResult.stderr || ""}`.trim();
+          allOutputs.push(`=== Processing ${solFile} ===\n${fileOutput}`);
+        }
+
+        const combinedOutput = allOutputs.join("\n\n");
+        const combinedCommand = allCommands.join("; ");
+
+        return {
+          ok: overallOk,
+          output: combinedOutput,
+          exitCode: overallOk ? 0 : 1,
+          command: combinedCommand,
+          resultsDir,
+        };
+
+      } catch (error) {
+        console.error("[MAIN] Error processing Solidity folder:", error);
+        return { ok: false, error: "Unable to process Solidity files from folder", output: "", command: "" };
+      }
+    }
+
     if (!sampleArg) {
       return { ok: false, error: "Sample path is required", output: "", command: "" };
     }
 
-    // Add run-tool arguments
+    // Add run-tool arguments for non-Solidity folder case
     args.push(
       "--language",
       language,
@@ -953,6 +1180,7 @@ app.whenReady().then(() => {
     );
 
     const command = `docker ${args.join(" ")}`;
+    console.log("[MAIN] Executing Docker command:", command);
 
     try {
       // Log for debugging
@@ -1141,6 +1369,102 @@ app.whenReady().then(() => {
         command,
         resultsDir,
       };
+    }
+  });
+
+  ipcMain.handle("docker:check-status", async () => {
+    try {
+      const result = await runProcess("docker", ["ps"], { trackProcess: false });
+      
+      if (result.code === 0) {
+        console.log('[IPC] Docker is running');
+        return { ok: true, isRunning: true, message: "Docker daemon is running" };
+      } else {
+        const errorMsg = result.stderr || result.stdout || "Unknown error";
+        console.warn(`[IPC] Docker not running: ${errorMsg}`);
+        return { ok: false, isRunning: false, error: errorMsg };
+      }
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : "Failed to check Docker status";
+      console.error(`[IPC] Error checking Docker status: ${errorMsg}`);
+      return { ok: false, isRunning: false, error: errorMsg };
+    }
+  });
+
+  ipcMain.handle("tools:remove-docker-image", async (_, imageName) => {
+    try {
+      if (!imageName || typeof imageName !== "string") {
+        return { ok: false, error: "Invalid image name" };
+      }
+
+      console.log(`[IPC] Removing Docker image: ${imageName}`);
+
+      const result = await runProcess("docker", ["rmi", "-f", imageName], { trackProcess: false });
+
+      if (result.code === 0) {
+        console.log(`[IPC] Successfully removed Docker image: ${imageName}`);
+        return { ok: true, message: `Docker image '${imageName}' removed successfully` };
+      } else {
+        const errorMsg = result.stderr || result.stdout || "Unknown error";
+        console.error(`[IPC] Failed to remove Docker image: ${errorMsg}`);
+        return { ok: false, error: errorMsg };
+      }
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : "Failed to remove Docker image";
+      console.error(`[IPC] Error removing Docker image: ${errorMsg}`);
+      return { ok: false, error: errorMsg };
+    }
+  });
+
+  ipcMain.handle("docker:check-image-exists", async (_, imageName) => {
+    try {
+      if (!imageName || typeof imageName !== "string") {
+        return { ok: false, exists: false, error: "Invalid image name" };
+      }
+
+      console.log(`[IPC] Checking if Docker image exists: ${imageName}`);
+
+      const result = await runProcess("docker", ["images", "--filter", `reference=${imageName}`, "--format", "{{.ID}}"], { trackProcess: false });
+
+      if (result.code === 0) {
+        const imageId = result.stdout.trim();
+        const exists = imageId.length > 0;
+        console.log(`[IPC] Docker image exists: ${exists} (ID: ${imageId || 'none'})`);
+        return { ok: true, exists };
+      } else {
+        const errorMsg = result.stderr || result.stdout || "Failed to check image";
+        console.error(`[IPC] Failed to check Docker image: ${errorMsg}`);
+        return { ok: false, exists: false, error: errorMsg };
+      }
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : "Failed to check Docker image";
+      console.error(`[IPC] Error checking Docker image: ${errorMsg}`);
+      return { ok: false, exists: false, error: errorMsg };
+    }
+  });
+
+  ipcMain.handle("docker:pull-image", async (_, imageName) => {
+    try {
+      if (!imageName || typeof imageName !== "string") {
+        return { ok: false, error: "Invalid image name" };
+      }
+
+      console.log(`[IPC] Pulling Docker image: ${imageName}`);
+
+      const result = await runProcess("docker", ["pull", imageName], { trackProcess: false });
+
+      if (result.code === 0) {
+        console.log(`[IPC] Successfully pulled Docker image: ${imageName}`);
+        return { ok: true, message: `Docker image pulled successfully` };
+      } else {
+        const errorMsg = result.stderr || result.stdout || "Failed to pull image";
+        console.error(`[IPC] Failed to pull Docker image: ${errorMsg}`);
+        return { ok: false, error: errorMsg };
+      }
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : "Failed to pull Docker image";
+      console.error(`[IPC] Error pulling Docker image: ${errorMsg}`);
+      return { ok: false, error: errorMsg };
     }
   });
 

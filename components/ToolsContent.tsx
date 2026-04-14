@@ -834,6 +834,183 @@ export default function ToolsContent() {
   const [userData, setUserData] = useState<any>(null);
   const [showSessionModal, setShowSessionModal] = useState(false);
   
+  // Docker image setup state
+  const [showImageSetupModal, setShowImageSetupModal] = useState(false);
+  const [imageSetupLoading, setImageSetupLoading] = useState(false);
+  const [imageSetupStatus, setImageSetupStatus] = useState("Checking tool configuration...");
+  const DOCKER_IMAGE_NAME = "rajeshbyreddy95/trustinn-tools:latest";
+  
+  
+  // Validate token and check trial/premium eligibility
+  const validateTokenAndCheckEligibility = async (type: Tab, onError: (msg: string) => void): Promise<boolean> => {
+    try {
+      const token = sessionStorage.getItem("trustinn_token");
+      if (!token) {
+        onError("❌ No valid session. Please login again.");
+        return false;
+      }
+
+      const response = await fetch("https://api.nitminer.com/api/auth/validate-token", {
+        method: "GET",
+        headers: {
+          "Authorization": `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+      });
+
+      if (!response.ok) {
+        console.error("[EXEC] Token validation failed, status:", response.status);
+        onError("❌ Token validation failed. Please login again.");
+        return false;
+      }
+
+      const data = await response.json();
+      console.log("[EXEC] Token validation response:", data);
+
+      if (!data.success || !data.data) {
+        console.error("[EXEC] Invalid response structure:", data);
+        onError("❌ Unable to validate your account. Please try again.");
+        return false;
+      }
+
+      const { trialCount = 0, isPremium = false } = data.data;
+      console.log(`[EXEC] User eligibility - Trials: ${trialCount}, Premium: ${isPremium}`);
+
+      // Update sessionStorage with fresh user data from backend
+      sessionStorage.setItem("trustinn_user", JSON.stringify(data.data));
+      console.log("[EXEC] Updated sessionStorage with fresh user data");
+
+      // User can execute if they have trials OR are premium
+      if (trialCount > 0 || isPremium) {
+        console.log("[EXEC] User eligible to execute");
+        return true;
+      } else {
+        console.log("[EXEC] User not eligible - no trials and not premium");
+        onError("❌ You don't have any trials or premium access. Please upgrade your plan.");
+        return false;
+      }
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : "Unknown error";
+      console.error("[EXEC] Token validation error:", error);
+      onError(`❌ Unable to validate your session: ${errorMsg}`);
+      return false;
+    }
+  };
+
+  // Check and pull Docker image if needed
+  const ensureDockerImageExists = async (): Promise<boolean> => {
+    try {
+      setShowImageSetupModal(true);
+      setImageSetupLoading(true);
+      setImageSetupStatus("Checking tool configuration...");
+
+      // Check if image exists
+      console.log("[DOCKER] Checking if image exists...");
+      const checkResult = await window.electronAPI?.checkDockerImageExists?.(DOCKER_IMAGE_NAME);
+      
+      if (!checkResult || !checkResult.ok) {
+        console.error("[DOCKER] Failed to check image:", checkResult?.error);
+        setImageSetupStatus("Error checking configuration");
+        return false;
+      }
+
+      if (checkResult.exists) {
+        console.log("[DOCKER] Image already exists");
+        setImageSetupStatus("Configuration ready!");
+        setImageSetupLoading(false);
+        setTimeout(() => setShowImageSetupModal(false), 800);
+        return true;
+      }
+
+      // Image doesn't exist, pull it
+      console.log("[DOCKER] Image not found, pulling...");
+      setImageSetupStatus("Downloading tool configuration...");
+      
+      const pullResult = await window.electronAPI?.pullDockerImage?.(DOCKER_IMAGE_NAME);
+      
+      if (!pullResult || !pullResult.ok) {
+        console.error("[DOCKER] Failed to pull image:", pullResult?.error);
+        setImageSetupStatus(`Error: ${pullResult?.error || "Failed to download"}`);
+        return false;
+      }
+
+      console.log("[DOCKER] Image pulled successfully");
+      setImageSetupStatus("Configuration ready!");
+      setImageSetupLoading(false);
+      setTimeout(() => setShowImageSetupModal(false), 800);
+      return true;
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : "Unknown error";
+      console.error("[DOCKER] Error ensuring image exists:", error);
+      setImageSetupStatus(`Error: ${errorMsg}`);
+      return false;
+    }
+  };
+
+  // Deduct one trial after successful execution
+  const deductTrialAndCheckStatus = async (): Promise<boolean> => {
+    try {
+      const token = sessionStorage.getItem("trustinn_token");
+      if (!token) {
+        console.warn("[TRIAL] No token available for trial deduction");
+        return false;
+      }
+
+      console.log("[TRIAL] Deducting 1 trial from user account");
+      
+      const response = await fetch("https://api.nitminer.com/api/auth/consume-trial", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+      });
+
+      if (!response.ok) {
+        console.error("[TRIAL] Trial deduction failed, status:", response.status);
+        return false;
+      }
+
+      const data = await response.json();
+      console.log("[TRIAL] Trial deduction response:", data);
+
+      if (!data.success || !data.data) {
+        console.error("[TRIAL] Invalid response structure:", data);
+        return false;
+      }
+
+      const { trialCount = 0, isPremium = false } = data.data;
+      console.log(`[TRIAL] After deduction - Trials: ${trialCount}, Premium: ${isPremium}`);
+
+      // Update sessionStorage with fresh user data
+      sessionStorage.setItem("trustinn_user", JSON.stringify(data.data));
+
+      // If trials reached 0 and user is not premium, remove Docker image
+      if (trialCount === 0 && !isPremium) {
+        console.log("[TRIAL] Trials exhausted and user not premium. Removing Docker image...");
+        try {
+          const removeResult = await window.electronAPI?.removeDockerImage?.(DOCKER_IMAGE_NAME);
+          if (removeResult?.ok) {
+            console.log("[TRIAL] Docker image removed successfully");
+          } else {
+            console.warn("[TRIAL] Failed to remove Docker image:", removeResult?.error);
+          }
+        } catch (error) {
+          console.warn("[TRIAL] Error removing Docker image:", error);
+          // Don't fail the execution if image removal fails
+        }
+      }
+
+      return true;
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : "Unknown error";
+      console.error("[TRIAL] Trial deduction error:", error);
+      // Don't fail execution if trial deduction fails, it's a background operation
+      return false;
+    }
+  };
+  
+  
   const [currentTab, setCurrentTab] = useState<Tab>("c");
   const [inputMode, setInputMode] = useState<InputMode>("file");
   const [cTool, setCTool] = useState("");
@@ -952,6 +1129,26 @@ export default function ToolsContent() {
     void checkAuth();
   }, []);
 
+  // Live code output listener
+  useEffect(() => {
+    const handleLiveOutput = (payload: { language: string; stream: string; data: string }) => {
+      const { language, data } = payload;
+      const validTabs: Tab[] = ["c", "java", "python", "solidity"];
+      if (validTabs.includes(language as Tab)) {
+        setTerminalOutputs((prev) => ({
+          ...prev,
+          [language as Tab]: (prev[language as Tab] || "") + data
+        }));
+      }
+    };
+
+    window.electronAPI?.onCodeOutputLive(handleLiveOutput);
+
+    return () => {
+      // Note: Electron IPC listeners are persistent, no need to remove
+    };
+  }, []);
+
   const getFileName = (v: string) =>
     v ? v.replace(/\\\\/g, "/").split("/").pop() || v : "";
 
@@ -1033,14 +1230,29 @@ export default function ToolsContent() {
   const loadSamplesForTool = async () => {
     setTerminalOutputs((prev) => ({ ...prev, [currentTab]: "" }));
 
+    // Validate trial/premium eligibility before loading samples
+    const isEligible = await validateTokenAndCheckEligibility(currentTab, (msg: string) => mockAppendOutput(currentTab, msg));
+    if (!isEligible) {
+      return;
+    }
+
     if (!currentTool) {
       mockAppendOutput(currentTab, `❌ Select a ${currentTab.toUpperCase()} tool first.`);
       return;
     }
+
+    // Check and pull Docker image if needed
+    const imageReady = await ensureDockerImageExists();
+    if (!imageReady) {
+      mockAppendOutput(currentTab, `❌ Failed to prepare tools. Please try again.`);
+      return;
+    }
+
     setIsLoadingSamples(true);
     mockAppendOutput(currentTab, `[EXEC] Loading samples for ${currentTool}...`);
     if (!window.electronAPI?.listSamples) {
       setSampleOptions((prev) => ({ ...prev, [currentTab]: [] }));
+      mockAppendOutput(currentTab, "❌ Sample loading unavailable. Run inside Electron (npm run electron-dev).");
       setIsLoadingSamples(false);
       return;
     }
@@ -1065,7 +1277,16 @@ export default function ToolsContent() {
   };
 
   const browseLocalFile = async () => {
-    if (!window.electronAPI?.pickFile) return;
+    // Validate trial/premium eligibility before browsing files
+    const isEligible = await validateTokenAndCheckEligibility(currentTab, (msg: string) => mockAppendOutput(currentTab, msg));
+    if (!isEligible) {
+      return;
+    }
+
+    if (!window.electronAPI?.pickFile) {
+      mockAppendOutput(currentTab, "❌ Desktop file picker unavailable. Run inside Electron (npm run electron-dev).");
+      return;
+    }
     const result = await window.electronAPI.pickFile();
     if (!result.ok || !("path" in result)) return;
     setSelectedLocalFilePath((prev) => ({ ...prev, [currentTab]: result.path }));
@@ -1078,7 +1299,16 @@ export default function ToolsContent() {
   };
 
   const browseSolidityFolder = async () => {
-    if (!window.electronAPI?.pickFolder) return;
+    // Validate trial/premium eligibility before browsing folders
+    const isEligible = await validateTokenAndCheckEligibility("solidity", (msg: string) => mockAppendOutput("solidity", msg));
+    if (!isEligible) {
+      return;
+    }
+
+    if (!window.electronAPI?.pickFolder) {
+      mockAppendOutput("solidity", "❌ Folder picker unavailable. Run inside Electron (npm run electron-dev).");
+      return;
+    }
     const result = await window.electronAPI.pickFolder();
 
     if (!result.ok) {
@@ -1128,6 +1358,12 @@ export default function ToolsContent() {
       }
     }
 
+    // Validate token with backend and check trial/premium eligibility
+    const isEligible = await validateTokenAndCheckEligibility(type, (msg: string) => mockAppendOutput(type, msg));
+    if (!isEligible) {
+      return;
+    }
+
     setTerminalOutputs((prev) => ({ ...prev, [type]: "" }));
 
     // Check tool selection
@@ -1146,32 +1382,20 @@ export default function ToolsContent() {
     setLoading(true);
 
     // Handle both file mode and code mode
-    let sourceType: "sample" | "file" | "folder" = "file";
+    let sourceType: "sample" | "file" | "folder" | "code" = "file";
     let sourcePath: string | undefined;
+    let codeContent: string | undefined;
 
     if (inputMode === "code") {
-      // Code mode - get written code
+      // Code mode - pass code directly
       const code = userCode[type];
       if (!code || !code.trim()) {
         mockAppendOutput(type, "❌ No code to analyze. Write or paste code first.");
         setLoading(false);
         return;
       }
-      // Create a temp file with the code - use electron API to create temp file
-      if (!window.electronAPI?.writeTempFile) {
-        mockAppendOutput(type, "❌ Temp file creation not available.");
-        setLoading(false);
-        return;
-      }
-      try {
-        sourcePath = await window.electronAPI.writeTempFile(code, type);
-        // Track temp file path for cleanup
-        setTempFilePaths((prev) => ({ ...prev, [type]: sourcePath }));
-      } catch (error) {
-        mockAppendOutput(type, `❌ Failed to create temp file: ${error instanceof Error ? error.message : "Unknown error"}`);
-        setLoading(false);
-        return;
-      }
+      sourceType = "code";
+      codeContent = code;
     } else {
       // File mode
       const localPath = selectedLocalFilePath[type];
@@ -1181,6 +1405,11 @@ export default function ToolsContent() {
       if (type === "solidity" && soliditySourceMode === "folder") {
         sourceType = "folder";
         sourcePath = localFolderPath;
+        if (!sourcePath || !sourcePath.trim()) {
+          mockAppendOutput(type, "❌ No Solidity folder selected. Please browse and select a folder first.");
+          setLoading(false);
+          return;
+        }
       } else {
         sourceType = localPath ? "file" : "sample";
         sourcePath = localPath || samplePath;
@@ -1219,18 +1448,24 @@ export default function ToolsContent() {
       // Even for compact tools, show that we're starting
       mockAppendOutput(type, `[EXEC] Analyzing ${type.toUpperCase()} code...`);
     }
-    if (!window.electronAPI?.runTool) { setLoading(false); return; }
+    if (!window.electronAPI?.runTool) {
+      mockAppendOutput(type, "❌ Tool execution unavailable. Electron IPC bridge not found.");
+      setLoading(false);
+      return;
+    }
 
     let result;
     try {
       result = await window.electronAPI.runTool({
         language: type,
         tool: currentTool,
-        sourceType,
+        sourceType: sourceType as any,
         samplePath: sourceType === "sample" ? sourcePath : undefined,
         filePath: sourceType === "file" ? sourcePath : undefined,
         folderPath: sourceType === "folder" ? sourcePath : undefined,
+        codeContent: sourceType === "code" ? codeContent : undefined,
         params,
+        compile: false, // executeCommand runs analysis tools
       });
     } catch (error) {
       mockAppendOutput(type, `❌ ${error instanceof Error ? error.message : "Unknown"}`);
@@ -1324,6 +1559,7 @@ export default function ToolsContent() {
           nextPercentageItems = [`Conditional Coverage: ${metrics.conditionalCoverage}%`];
         }
       } else if (currentTool === VERISOL_TOOL) {
+        displayOutput = rawOutput; // Show full output for VeriSol without trimming
         const metrics = parseVeriSolMetrics(rawOutput);
         nextTitle = "VeriSol Analytics";
         if (metrics) {
@@ -1346,9 +1582,23 @@ export default function ToolsContent() {
 
       // Show output first, then status
       if (result.output) {
-        // Has output - execution happened
+        // Has output - execution happened (successful execution)
         if (!compactTerminalOutput) {
           mockAppendOutput(type, "✅ Execution completed.");
+        }
+        
+        // Deduct one trial after successful execution if user is not premium
+        const userData = sessionStorage.getItem("trustinn_user");
+        if (userData) {
+          try {
+            const user = JSON.parse(userData);
+            if (!user.isPremium) {
+              console.log("[EXEC] Deducting trial after successful execution");
+              await deductTrialAndCheckStatus();
+            }
+          } catch (error) {
+            console.warn("[EXEC] Failed to parse user data for trial deduction:", error);
+          }
         }
       } else if (!result.ok) {
         // No output and not ok - actual failure
@@ -1385,111 +1635,145 @@ export default function ToolsContent() {
       return;
     }
 
+    // Validate token with backend and check trial/premium eligibility
+    const isEligible = await validateTokenAndCheckEligibility(type, (msg: string) => mockAppendOutput(type, msg));
+    if (!isEligible) {
+      return;
+    }
+
     setTerminalOutputs((prev) => ({ ...prev, [type]: "" }));
     setIsCompiling(true);
 
-    // Get code source based on input mode
-    let code: string = "";
+    const compactTools = new Set([
+      DSE_MUTATION_TOOL,
+      DYNAMIC_SYMBOLIC_TOOL,
+      DSE_PRUNING_TOOL,
+      ADVANCED_COVERAGE_TOOL,
+      MUTATION_TESTING_TOOL,
+      JBMC_TOOL,
+      PYTHON_FUZZ_TOOL,
+    ]);
+    const compactTerminalOutput = compactTools.has(currentTool);
+
+    // Handle both file mode and code mode
+    let sourceType: "sample" | "file" | "folder" | "code" = "file";
+    let sourcePath: string | undefined;
+    let codeContent: string | undefined;
 
     if (inputMode === "code") {
-      code = userCode[type];
+      // Code mode - pass code directly
+      const code = userCode[type];
       if (!code || !code.trim()) {
         mockAppendOutput(type, "❌ No code to compile/execute. Write or paste code first.");
         setIsCompiling(false);
         return;
       }
+      sourceType = "code";
+      codeContent = code;
     } else {
-      // File mode - only allow local uploaded files
+      // File mode
       const localPath = selectedLocalFilePath[type];
+      const localFolderPath = type === "solidity" ? selectedLocalFolderPath : "";
       const samplePath = selectedSamplePath[type];
 
       if (type === "solidity" && soliditySourceMode === "folder") {
-        if (!selectedLocalFolderPath) {
-          mockAppendOutput(type, "❌ No Solidity folder selected. Please select a folder first.");
-        } else {
-          mockAppendOutput(type, "📁 Solidity folder projects are supported via Execute only.");
+        sourceType = "folder";
+        sourcePath = localFolderPath;
+        if (!sourcePath || !sourcePath.trim()) {
+          mockAppendOutput(type, "❌ No Solidity folder selected. Please browse and select a folder first.");
+          setIsCompiling(false);
+          return;
         }
-        setIsCompiling(false);
-        return;
-      }
-      
-      if (samplePath && !localPath) {
-        // Sample files are in Docker container - can only be accessed via Execute
-        mockAppendOutput(type, "📁 Sample files can only be used with Execute button (security tools). To compile and test, use the Code tab or upload a local file.");
-        setIsCompiling(false);
-        return;
+      } else {
+        sourceType = localPath ? "file" : "sample";
+        sourcePath = localPath || samplePath;
       }
 
-      if (!localPath) {
+      if (!sourcePath) {
         mockAppendOutput(type, "❌ No file selected. Please select a file first.");
         setIsCompiling(false);
         return;
       }
 
       // Validate file extension matches language
-      const fileExt = localPath.split('.').pop()?.toLowerCase();
-      const expectedExtensions: Record<Tab, string> = {
-        c: 'c',
-        java: 'java',
-        python: 'py',
-        solidity: 'sol',
-      };
-      const expectedExt = expectedExtensions[type];
+      if (sourceType === "file") {
+        const fileExt = sourcePath.split('.').pop()?.toLowerCase();
+        const expectedExtensions: Record<Tab, string> = {
+          c: 'c',
+          java: 'java',
+          python: 'py',
+          solidity: 'sol',
+        };
+        const expectedExt = expectedExtensions[type];
 
-      if (fileExt !== expectedExt) {
-        mockAppendOutput(type, `❌ Invalid file type. For ${type.toUpperCase()}, only .${expectedExt} files are allowed.`);
-        setIsCompiling(false);
-        return;
-      }
-
-      if (!window.electronAPI?.readFile) {
-        mockAppendOutput(type, "❌ File read not available.");
-        setIsCompiling(false);
-        return;
-      }
-
-      try {
-        code = await window.electronAPI.readFile(localPath);
-        if (!code || !code.trim()) {
-          mockAppendOutput(type, "❌ File is empty.");
+        if (fileExt !== expectedExt) {
+          mockAppendOutput(type, `❌ Invalid file type. For ${type.toUpperCase()}, only .${expectedExt} files are allowed.`);
           setIsCompiling(false);
           return;
         }
-      } catch (error) {
-        mockAppendOutput(type, `❌ Failed to read file: ${error instanceof Error ? error.message : "Unknown error"}`);
-        setIsCompiling(false);
-        return;
       }
     }
 
-    mockAppendOutput(type, `[Compilation] Compiling ${type.toUpperCase()} code...`);
+    const params = type === "c" ? cParams : type === "solidity" ? solidityParams : "{}";
 
-    try {
-      const response = await fetch("/api/code-execute", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          language: type,
-          code: code,
-        }),
-      });
+    mockAppendOutput(type, `[Compilation] Compiling and executing ${type.toUpperCase()} code...`);
 
-      const data = await response.json();
-
-      if (!response.ok) {
-        mockAppendOutput(type, `❌ Error: ${data.error || "Unknown error"}`);
-        setIsCompiling(false);
-        return;
-      }
-
-      mockAppendOutput(type, `[Execution] Output:`);
-      mockAppendOutput(type, data.output);
-      mockAppendOutput(type, `✅ Execution completed successfully.`);
-    } catch (error) {
-      mockAppendOutput(type, `❌ ${error instanceof Error ? error.message : "Unknown error"}`);
-    } finally {
+    if (!window.electronAPI?.runTool) {
+      mockAppendOutput(type, "❌ Tool execution unavailable. Electron IPC bridge not found.");
       setIsCompiling(false);
+      return;
     }
+
+    let result;
+    try {
+      result = await window.electronAPI.runTool({
+        language: type,
+        tool: currentTool, // Still pass tool for consistency
+        sourceType: sourceType as any,
+        samplePath: sourceType === "sample" ? sourcePath : undefined,
+        filePath: sourceType === "file" ? sourcePath : undefined,
+        folderPath: sourceType === "folder" ? sourcePath : undefined,
+        codeContent: sourceType === "code" ? codeContent : undefined,
+        params,
+        compile: true, // compileCode executes the code
+      });
+    } catch (error) {
+      mockAppendOutput(type, `❌ ${error instanceof Error ? error.message : "Unknown"}`);
+      setIsCompiling(false);
+      return;
+    }
+
+    // Process result
+    if (result.output) {
+      // Has output - execution happened (successful execution)
+      if (result.output.includes("\n")) {
+        result.output.split("\n").forEach((l: string) => { if (l.trim()) mockAppendOutput(type, l); });
+      } else {
+        mockAppendOutput(type, result.output);
+      }
+      if (!compactTerminalOutput) {
+        mockAppendOutput(type, "✅ Execution completed.");
+      }
+      
+      // Deduct one trial after successful execution if user is not premium
+      const userData = sessionStorage.getItem("trustinn_user");
+      if (userData) {
+        try {
+          const user = JSON.parse(userData);
+          if (!user.isPremium) {
+            console.log("[COMPILE] Deducting trial after successful execution");
+            await deductTrialAndCheckStatus();
+          }
+        } catch (error) {
+          console.warn("[COMPILE] Failed to parse user data for trial deduction:", error);
+        }
+      }
+    } else if (!result.ok) {
+      // No output and not ok - actual failure
+      mockAppendOutput(type, `❌ ${result.error || "Unknown error"}`);
+    }
+
+    setIsCompiling(false);
   };
 
   const copyToClipboard = () => {
@@ -1685,6 +1969,57 @@ export default function ToolsContent() {
         onClose={() => setShowSessionModal(false)}
       />
 
+      {/* Image Setup Modal */}
+      {showImageSetupModal && (
+        <div style={{
+          position: "fixed", top: 0, left: 0, width: "100%", height: "100%",
+          background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center",
+          justifyContent: "center", zIndex: 10000, backdropFilter: "blur(4px)"
+        }}>
+          <div style={{
+            background: "white", borderRadius: 16, padding: 40, maxWidth: 400,
+            textAlign: "center", boxShadow: "0 10px 40px rgba(0,0,0,0.2)"
+          }}>
+            <div style={{
+              width: 60, height: 60, background: "#f0f4ff", borderRadius: "50%",
+              margin: "0 auto 20px", display: "flex", alignItems: "center",
+              justifyContent: "center", fontSize: 32
+            }}>
+              ⚙️
+            </div>
+            <h2 style={{ margin: "0 0 12px", fontSize: 20, fontWeight: 600, color: "#1a1a1a" }}>
+              Setting up your tools
+            </h2>
+            <p style={{
+              margin: "0 0 24px", fontSize: 14, color: "#666",
+              lineHeight: 1.5
+            }}>
+              {imageSetupStatus}
+            </p>
+            {imageSetupLoading && (
+              <div style={{
+                display: "flex", justifyContent: "center", gap: 6, margin: "20px 0"
+              }}>
+                {[0, 1, 2].map((i) => (
+                  <div key={i} style={{
+                    width: 8, height: 8, borderRadius: "50%",
+                    background: "#6366f1", opacity: 0.4 + (i * 0.2),
+                    animation: `pulse 1.5s ease-in-out ${i * 0.2}s infinite`
+                  }} />
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      <style>{`
+        @keyframes pulse {
+          0%, 100% { opacity: 0.3; transform: scale(1); }
+          50% { opacity: 1; transform: scale(1.1); }
+        }
+      `}</style>
+
       {/* ── Language Tabs — full width with icons ── */}
       <div
         style={{
@@ -1750,6 +2085,11 @@ export default function ToolsContent() {
               {currentTab === "python" && <option value="Condition Coverage Fuzzing">Condition Coverage Fuzzing</option>}
               {currentTab === "solidity" && <option value="VeriSol">Solidity — Smart Contract Verifier</option>}
             </select>
+            {inputMode === "code" && (
+              <div style={{ fontSize: 10, color: TOKEN.textMuted, marginTop: 4 }}>
+                Note: Compile executes code directly. Execute runs selected security tool.
+              </div>
+            )}
 
             {/* Param boxes */}
             {currentTab === "c" && cTool === "Condition Satisfiability Analysis" && (
@@ -1939,7 +2279,7 @@ export default function ToolsContent() {
                       onExecute={() => executeCommand(currentTab)}
                       onStop={() => void stopExecution("Stopped")}
                       isExecuting={loading}
-                      toolSelected={Boolean(currentTool)}
+                      toolSelected={inputMode === "code" ? true : Boolean(currentTool)}
                       onCompile={() => compileCode(currentTab)}
                       isCompiling={isCompiling}
                     />

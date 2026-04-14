@@ -36,15 +36,17 @@ declare global {
       runTool: (payload: {
         language: "c" | "solidity" | string;
         tool: string;
-        sourceType: "sample" | "file" | "folder";
+        sourceType: "sample" | "file" | "folder" | "code";
         samplePath?: string;
         filePath?: string;
         folderPath?: string;
+        codeContent?: string;
         params?: string;
         persistResults?: boolean;
         image?: string;
         platform?: string;
         resultsDir?: string;
+        compile?: boolean;
       }) => Promise<{
         ok: boolean;
         output: string;
@@ -82,6 +84,10 @@ declare global {
         resultsDir?: string;
         error?: string;
       }>;
+      checkDockerStatus: () => Promise<{ ok: boolean; isRunning: boolean; message?: string; error?: string }>;
+      removeDockerImage: (imageName: string) => Promise<{ ok: boolean; message?: string; error?: string }>;
+      checkDockerImageExists: (imageName: string) => Promise<{ ok: boolean; exists: boolean; error?: string }>;
+      pullDockerImage: (imageName: string) => Promise<{ ok: boolean; message?: string; error?: string }>;
       onSetupPullingImage: (callback: () => void) => void;
       onSetupProgress: (callback: (progress: number) => void) => void;
       onSetupStatus: (callback: (payload: { message?: string; progress?: number }) => void) => void;
@@ -92,6 +98,7 @@ declare global {
       onUpdateProgress: (callback: (progress: unknown) => void) => void;
       onUpdateDownloaded: (callback: () => void) => void;
       quitAndInstall: () => Promise<unknown>;
+      onCodeOutputLive: (callback: (payload: { language: string; stream: string; data: string }) => void) => void;
     };
   }
 }

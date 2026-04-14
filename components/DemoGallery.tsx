@@ -659,7 +659,13 @@ export default function DomeGallery({
                   onClick={onTileClick}
                   onPointerUp={onTilePointerUp}
                 >
-                  <img src={it.src || fallbackImageSrc} draggable={false} alt={it.alt} />
+                  <img 
+                    src={it.src || fallbackImageSrc} 
+                    draggable={false} 
+                    alt={it.alt}
+                    loading="lazy"
+                    decoding="async"
+                  />
                 </div>
               </div>
             ))}

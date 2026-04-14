@@ -36,6 +36,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
   },
   listCSamples: (payload) => ipcRenderer.invoke("tools:list-c-samples", payload),
   runCTool: (payload) => ipcRenderer.invoke("tools:run-c-tool", payload),
+  checkDockerStatus: () => ipcRenderer.invoke("docker:check-status"),
+  removeDockerImage: (imageName) => ipcRenderer.invoke("tools:remove-docker-image", imageName),
+  checkDockerImageExists: (imageName) => ipcRenderer.invoke("docker:check-image-exists", imageName),
+  pullDockerImage: (imageName) => ipcRenderer.invoke("docker:pull-image", imageName),
   
   // Setup event listeners
   onSetupPullingImage: (callback) => ipcRenderer.on("setup:pulling-image", callback),
@@ -50,4 +54,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   onUpdateProgress: (callback) => ipcRenderer.on("update:progress", (_event, progress) => callback(progress)),
   onUpdateDownloaded: (callback) => ipcRenderer.on("update:downloaded", callback),
   quitAndInstall: () => ipcRenderer.invoke("update:quit-and-install"),
+  
+  // Code execution live output
+  onCodeOutputLive: (callback) => ipcRenderer.on("code-output-live", (_event, payload) => callback(payload)),
 });

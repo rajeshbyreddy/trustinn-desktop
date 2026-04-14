@@ -7,7 +7,7 @@ const { dialog, BrowserWindow, shell } = require("electron");
 
 const CONFIG_DIR = path.join(os.homedir(), "AppData", "Roaming", "TrustINN");
 const CONFIG_FILE = path.join(CONFIG_DIR, "config.ini");
-const DOCKER_IMAGE = "rajeshbyreddy95/trustinn-tools:4.1.2";
+const DOCKER_IMAGE = "rajeshbyreddy95/trustinn-tools:latest";
 const DEFAULT_RESULTS_DIR = path.join(os.homedir(), "Downloads", "TrustinnDownloads");
 
 function getMainWindow() {
@@ -91,7 +91,7 @@ function isDockerImagePresentLocally() {
 function showErrorDialog(title, message) {
   const mainWindow = getMainWindow();
   if (mainWindow) {
-    dialog.showErrorDialog(mainWindow, title, message);
+    dialog.showErrorBox(title, message);
   }
 }
 

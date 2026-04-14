@@ -27,7 +27,7 @@ This document explains the overall architecture of the Windows installer and aut
                                     │   Docker Hub     │
                                     │   rajeshbyreddy95│
                                     │   /trustinn-tools│
-                                    │   :4.1.2         │
+                                    │   :latest       │
                                     └──────────────────┘
 ```
 
@@ -258,11 +258,11 @@ App Startup:
 ## Docker Image Pulling Flow
 
 ```
-User doesn't have image: rajeshbyreddy95/trustinn-tools:4.1.2
+User doesn't have image: rajeshbyreddy95/trustinn-tools:latest
         ↓
 pullDockerImage() called
         ↓
-spawn("docker", ["pull", "rajeshbyreddy95/trustinn-tools:4.1.2"])
+spawn("docker", ["pull", "rajeshbyreddy95/trustinn-tools:latest"])
         ↓
 Capture stdout/stderr
         ↓

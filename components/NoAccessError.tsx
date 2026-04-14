@@ -148,7 +148,7 @@ async function buildDeviceInfo(): Promise<LocalDeviceInfo> {
 }
 
 export default function NoAccessError() {
-  const NITMINER_AUTH_API = 'https://www.nitminer.com/api/auth/login';
+  const NITMINER_AUTH_API = 'https://api.nitminer.com/api/auth/login';
   const NITMINER_DUPLICATE_CHECK_API = 'https://www.nitminer.com/api/auth/session/check-duplicate';
   const NITMINER_INVALIDATE_OTHERS_API = 'https://www.nitminer.com/api/auth/session/invalidate-others';
 
@@ -167,6 +167,52 @@ export default function NoAccessError() {
   const [pendingLoginPayload, setPendingLoginPayload] = useState<Record<string, unknown> | null>(null);
   const [pendingDeviceInfo, setPendingDeviceInfo] = useState<LocalDeviceInfo | null>(null);
   const [duplicateLoading, setDuplicateLoading] = useState(false);
+
+  const [dockerModalOpen, setDockerModalOpen] = useState(false);
+  const [dockerLoading, setDockerLoading] = useState(false);
+
+  const openLoginForm = () => {
+    try {
+      console.log('[LOGIN] openLoginForm called');
+      console.log('[LOGIN] Current state - showLogin:', showLogin, 'success:', success);
+      setError('');
+      setShowLogin(true);
+      console.log('[LOGIN] setShowLogin(true) called');
+    } catch (err) {
+      console.error('[LOGIN_ERROR]', err);
+    }
+  };
+
+  const checkDockerAndProceedToLogin = async () => {
+    console.log('[DOCKER_CHECK] Starting Docker status check');
+    setDockerLoading(true);
+    try {
+      const result = await window.electronAPI?.checkDockerStatus?.();
+      if (result?.ok && result?.isRunning) {
+        console.log('[DOCKER_CHECK] Docker is running, proceeding to login');
+        setDockerModalOpen(false);
+        openLoginForm();
+      } else {
+        console.log('[DOCKER_CHECK] Docker is not running');
+        setDockerModalOpen(true);
+      }
+    } catch (err) {
+      console.error('[DOCKER_CHECK] Error checking Docker status:', err);
+      setDockerModalOpen(true);
+    } finally {
+      setDockerLoading(false);
+    }
+  };
+
+  const handleLoginButtonClick = (e: React.MouseEvent<HTMLButtonElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    console.log('[LOGIN_BUTTON_CLICK] Button clicked, event type:', e.type);
+    void checkDockerAndProceedToLogin();
+  };
+
+  // Debug render state
+  console.log('[RENDER_DEBUG] success:', success, 'showLogin:', showLogin, 'condition result:', showLogin);
 
   useEffect(() => {
     const checkSession = async () => {
@@ -194,7 +240,8 @@ export default function NoAccessError() {
           const data = await response.json();
           isValidToken = Boolean(response.ok && data?.isValid);
         } catch (validateError) {
-          console.error('Token validation request failed:', validateError);
+          console.error('[SESSION] Token validation request failed:', validateError);
+          // Silent failure - token stays invalid, proceed to login screen
         }
 
         if (!isValidToken) {
@@ -239,7 +286,9 @@ export default function NoAccessError() {
         body: JSON.stringify({ ...payload, ...deviceInfo }),
       });
     }
-    const data: LoginResponse = await response.json();
+    const data: any = await response.json();
+    console.log('[LOGIN] Response status:', response.status, 'Data:', data);
+    
     if (response.status === 409 && (data as any)?.isDuplicate) {
       setDuplicateSessions(Array.isArray((data as any).existingSessions) ? (data as any).existingSessions : []);
       setPendingLoginPayload(payload);
@@ -247,15 +296,54 @@ export default function NoAccessError() {
       setDuplicateModalOpen(true);
       return;
     }
-    if (!response.ok || !data.token || !data.user) {
+    
+    if (!response.ok) {
+      console.error('[LOGIN] Response not ok, status:', response.status);
+      throw new Error(data.error || data.message || 'Login failed. Please try again.');
+    }
+    
+    // Handle nested response structure where token/user are inside data.data
+    const loginData = data.data || data;
+    console.log('[LOGIN] Extracted login data:', loginData);
+    
+    if (!loginData.token || !loginData.user) {
+      console.error('[LOGIN] Missing token or user. Token:', !!loginData.token, 'User:', !!loginData.user);
+      console.error('[LOGIN] Full response data:', data);
       throw new Error(data.error || data.message || 'Login failed. Please try again.');
     }
     const expiryTime = Date.now() + 60 * 60 * 1000;
     const expiryISO = new Date(expiryTime).toISOString();
-    sessionStorage.setItem('trustinn_token', data.token);
-    sessionStorage.setItem('trustinn_user_id', data.user.id);
+    sessionStorage.setItem('trustinn_token', loginData.token);
+    sessionStorage.setItem('trustinn_user_id', loginData.user.id);
     sessionStorage.setItem('token_expires', expiryISO);
-    sessionStorage.setItem('trustinn_user', JSON.stringify(data.user));
+    sessionStorage.setItem('trustinn_user', JSON.stringify(loginData.user));
+    
+    // Check if user has no trials and is not premium, then remove Docker images
+    const { trialCount = 0, isPremium = false } = loginData.user;
+    if (trialCount <= 0 && !isPremium) {
+      console.log('[LOGIN] User has no trials and not premium. Removing Docker images.');
+      try {
+        // Remove trustinn tools image
+        const removeResult1 = await window.electronAPI?.removeDockerImage?.('rajeshbyreddy95/trustinn-tools:latest');
+        if (removeResult1?.ok) {
+          console.log('[LOGIN] Docker image rajeshbyreddy95/trustinn-tools:latest removed successfully');
+        } else {
+          console.warn('[LOGIN] Failed to remove Docker image:', removeResult1?.error);
+        }
+        
+        // Remove welcome-to-docker image
+        const removeResult2 = await window.electronAPI?.removeDockerImage?.('docker/welcome-to-docker:latest');
+        if (removeResult2?.ok) {
+          console.log('[LOGIN] Docker image docker/welcome-to-docker:latest removed successfully');
+        } else {
+          console.warn('[LOGIN] Failed to remove Docker image:', removeResult2?.error);
+        }
+      } catch (removeError) {
+        console.error('[LOGIN] Error removing Docker images:', removeError);
+        // Continue with login even if image removal fails
+      }
+    }
+    
     setSessionExpiry(expiryTime);
     setSuccess(true);
     setTimeout(() => {
@@ -265,6 +353,7 @@ export default function NoAccessError() {
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    console.log('[FORM] Login form submitted');
     setError('');
     setLoading(true);
     try {
@@ -281,16 +370,39 @@ export default function NoAccessError() {
         return;
       }
 
-      const payload = {
-        ...(loginMode === 'email' ? { email: identifier.toLowerCase().trim() } : { username: identifier.trim() }),
+      // Check Docker is running before proceeding
+      console.log('[LOGIN] Checking if Docker is running');
+      const dockerCheck = await window.electronAPI?.checkDockerStatus?.();
+      if (!dockerCheck?.isRunning) {
+        console.log('[LOGIN] Docker is not running');
+        setDockerModalOpen(true);
+        setLoading(false);
+        return;
+      }
+      console.log('[LOGIN] Docker is running, proceeding with login');
+
+      const loginPayload = {
+        emailOrUsername: identifier.toLowerCase().trim(),
         password,
         rememberMe: true
       };
 
       const deviceInfo = await buildDeviceInfo();
+      console.log('[LOGIN] Device built, checking for duplicates');
       setDuplicateLoading(true);
 
-      const duplicateBody = JSON.stringify({ ...payload, ...deviceInfo });
+      // Check-duplicate endpoint expects email/username (not emailOrUsername)
+      const duplicatePayload = {
+        ...(loginMode === 'email' ? { email: identifier.toLowerCase().trim() } : { username: identifier.trim() }),
+        password,
+        deviceId: deviceInfo.deviceId,
+        deviceFingerprint: deviceInfo.deviceFingerprint,
+        deviceName: deviceInfo.deviceName,
+        browser: deviceInfo.browser,
+        os: deviceInfo.os
+      };
+
+      const duplicateBody = JSON.stringify(duplicatePayload);
       let duplicateResponse: Response;
       try {
         duplicateResponse = await fetch(NITMINER_DUPLICATE_CHECK_API, {
@@ -309,15 +421,45 @@ export default function NoAccessError() {
       const duplicateData = await duplicateResponse.json();
       if (duplicateData?.isDuplicate) {
         setDuplicateSessions(Array.isArray(duplicateData.existingSessions) ? duplicateData.existingSessions : []);
-        setPendingLoginPayload(payload);
+        setPendingLoginPayload(loginPayload);
         setPendingDeviceInfo(deviceInfo);
         setDuplicateModalOpen(true);
         return;
       }
 
-      await doLogin(payload, deviceInfo);
+      // Check if user has no trials and is not premium
+      if (duplicateData?.user) {
+        const { trialCount = 0, isPremium = false } = duplicateData.user;
+        if (trialCount <= 0 && !isPremium) {
+          console.log('[LOGIN] User has no trials and not premium. Removing Docker images.');
+          try {
+            // Remove trustinn tools image
+            const removeResult1 = await window.electronAPI?.removeDockerImage?.('rajeshbyreddy95/trustinn-tools:latest');
+            if (removeResult1?.ok) {
+              console.log('[LOGIN] Docker image rajeshbyreddy95/trustinn-tools:latest removed successfully');
+            } else {
+              console.warn('[LOGIN] Failed to remove Docker image:', removeResult1?.error);
+            }
+            
+            // Remove welcome-to-docker image
+            const removeResult2 = await window.electronAPI?.removeDockerImage?.('docker/welcome-to-docker:latest');
+            if (removeResult2?.ok) {
+              console.log('[LOGIN] Docker image docker/welcome-to-docker:latest removed successfully');
+            } else {
+              console.warn('[LOGIN] Failed to remove Docker image:', removeResult2?.error);
+            }
+          } catch (removeError) {
+            console.error('[LOGIN] Error removing Docker images:', removeError);
+            // Continue with login even if image removal fails
+          }
+        }
+      }
+
+      await doLogin(loginPayload, deviceInfo);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'An error occurred during login');
+      const errorMsg = err instanceof Error ? err.message : 'An error occurred during login';
+      console.error('[LOGIN] Error:', errorMsg);
+      setError(errorMsg);
     } finally {
       setDuplicateLoading(false);
       setLoading(false);
@@ -338,7 +480,7 @@ export default function NoAccessError() {
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
           body: JSON.stringify({
-            ...(pendingLoginPayload.email ? { email: pendingLoginPayload.email } : { username: pendingLoginPayload.username }),
+            emailOrUsername: pendingLoginPayload.emailOrUsername,
             deviceId: pendingDeviceInfo.deviceId,
             deviceFingerprint: pendingDeviceInfo.deviceFingerprint,
           }),
@@ -349,7 +491,7 @@ export default function NoAccessError() {
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
           body: JSON.stringify({
-            ...(pendingLoginPayload.email ? { email: pendingLoginPayload.email } : { username: pendingLoginPayload.username }),
+            emailOrUsername: pendingLoginPayload.emailOrUsername,
             deviceId: pendingDeviceInfo.deviceId,
             deviceFingerprint: pendingDeviceInfo.deviceFingerprint,
           }),
@@ -398,6 +540,8 @@ export default function NoAccessError() {
           z-index: 0;
           pointer-events: none;
           opacity: 0.42;
+          width: 100vw;
+          height: 100vh;
         }
 
         /* Soft light background */
@@ -446,7 +590,6 @@ export default function NoAccessError() {
           border: 1px solid rgba(0,0,0,0.08);
           border-radius: 28px;
           overflow: hidden;
-          backdrop-filter: blur(40px);
           box-shadow: 0 10px 40px rgba(0,0,0,0.08),
                       0 2px 10px rgba(0,0,0,0.05),
                       inset 0 1px 0 rgba(255,255,255,0.9);
@@ -562,12 +705,16 @@ export default function NoAccessError() {
           letter-spacing: 0.2px;
           cursor: pointer;
           display: flex; align-items: center; justify-content: center; gap: 8px;
-          transition: all 0.2s;
+          transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
           box-shadow: 0 8px 25px rgba(99,102,241,0.35);
+          position: relative;
         }
-        .ti-btn-primary:hover {
+        .ti-btn-primary:hover:not(:disabled) {
+          box-shadow: 0 14px 40px rgba(99,102,241,0.5);
           transform: translateY(-2px);
-          box-shadow: 0 14px 35px rgba(99,102,241,0.45);
+        }
+        .ti-btn-primary:active:not(:disabled) {
+          transform: translateY(0);
         }
         .ti-btn-primary:disabled { opacity: 0.65; cursor: not-allowed; transform: none; }
 
@@ -719,10 +866,11 @@ export default function NoAccessError() {
         /* Duplicate Modal */
         .ti-modal-overlay {
           position: fixed; inset: 0; z-index: 100;
-          background: rgba(0,0,0,0.6);
+          background: rgba(0,0,0,0.5);
           backdrop-filter: blur(12px);
           display: flex; align-items: center; justify-content: center;
           padding: 24px;
+          animation: fadeIn 0.2s ease;
         }
         .ti-modal {
           width: 100%; max-width: 400px;
@@ -731,7 +879,10 @@ export default function NoAccessError() {
           border-radius: 24px;
           overflow: hidden;
           box-shadow: 0 25px 60px rgba(0,0,0,0.15);
+          animation: slideUp 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
         }
+        @keyframes slideUp { from { transform: translateY(16px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+        
         .ti-modal-head {
           padding: 24px 28px 20px;
           border-bottom: 1px solid #f1f5f9;
@@ -743,12 +894,14 @@ export default function NoAccessError() {
           border: 1px solid #fde68c;
           border-radius: 10px;
           display: flex; align-items: center; justify-content: center;
+          flex-shrink: 0;
         }
         .ti-modal-title {
           font-family: 'Syne', sans-serif;
           font-size: 17.5px;
           font-weight: 700;
           color: #1a1a2e;
+          margin: 0;
         }
         .ti-modal-body { padding: 20px 28px; }
         .ti-modal-desc {
@@ -766,10 +919,11 @@ export default function NoAccessError() {
         }
         .ti-modal-device-name {
           font-size: 14.5px; font-weight: 600; color: #1a1a2e;
-          margin-bottom: 3px;
+          margin: 0 0 3px 0;
         }
         .ti-modal-device-meta {
           font-size: 12.5px; color: #64748b;
+          margin: 0;
         }
 
         .ti-modal-foot {
@@ -785,10 +939,12 @@ export default function NoAccessError() {
           font-size: 13.5px; font-weight: 600;
           cursor: pointer;
           transition: all 0.2s;
+          font-family: 'DM Sans', sans-serif;
         }
         .ti-modal-cancel:hover {
           background: #f1f5f9;
           color: #334155;
+          border-color: #cbd5e1;
         }
 
         .ti-modal-force {
@@ -802,8 +958,9 @@ export default function NoAccessError() {
           display: flex; align-items: center; justify-content: center; gap: 6px;
           transition: all 0.2s;
           box-shadow: 0 4px 16px rgba(239,68,68,0.3);
+          font-family: 'DM Sans', sans-serif;
         }
-        .ti-modal-force:hover {
+        .ti-modal-force:hover:not(:disabled) {
           box-shadow: 0 8px 25px rgba(239,68,68,0.4);
           transform: translateY(-1px);
         }
@@ -878,6 +1035,83 @@ export default function NoAccessError() {
                     <Loader size={15} className="spin" />
                   ) : (
                     <><LogOut size={15} /> Logout & Continue</>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Docker Not Running Modal */}
+        {dockerModalOpen && (
+          <div className="ti-modal-overlay">
+            <div className="ti-modal" style={{ maxWidth: 480 }}>
+              <div className="ti-modal-head" style={{ background: 'linear-gradient(135deg, #fee2e2, #fef3f2)', borderBottom: '1px solid #fecaca' }}>
+                <div className="ti-modal-warn-icon" style={{ background: 'linear-gradient(135deg, #fca5a5, #f87171)', border: 'none' }}>
+                  <AlertCircle size={22} color="#fff" />
+                </div>
+                <div>
+                  <div className="ti-modal-title" style={{ color: '#991b1b' }}>Docker Not Running</div>
+                  <div style={{ fontSize: '12px', color: '#7c2d2d', marginTop: 2 }}>Start Docker Desktop to continue</div>
+                </div>
+              </div>
+              <div className="ti-modal-body" style={{ paddingBottom: 0 }}>
+                <p className="ti-modal-desc" style={{ marginBottom: 20, color: '#64748b' }}>
+                  Docker is required to run security analysis tools. Here's how to start it:
+                </p>
+                
+                {/* Steps */}
+                <div style={{ background: '#fafafa', borderRadius: 12, padding: 16, marginBottom: 20 }}>
+                  <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
+                    <div style={{ background: '#6366f1', color: '#fff', width: 28, height: 28, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600, flexShrink: 0 }}>1</div>
+                    <div>
+                      <div style={{ fontWeight: 600, color: '#1a1a2e', fontSize: 13.5 }}>Locate Docker Desktop</div>
+                      <div style={{ fontSize: 12, color: '#64748b', marginTop: 3 }}>Find Docker Desktop in your Applications folder</div>
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
+                    <div style={{ background: '#6366f1', color: '#fff', width: 28, height: 28, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600, flexShrink: 0 }}>2</div>
+                    <div>
+                      <div style={{ fontWeight: 600, color: '#1a1a2e', fontSize: 13.5 }}>Double-click to Launch</div>
+                      <div style={{ fontSize: 12, color: '#64748b', marginTop: 3 }}>Wait for the Docker icon to appear in the menu bar</div>
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 12 }}>
+                    <div style={{ background: '#6366f1', color: '#fff', width: 28, height: 28, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600, flexShrink: 0 }}>3</div>
+                    <div>
+                      <div style={{ fontWeight: 600, color: '#1a1a2e', fontSize: 13.5 }}>Check Status</div>
+                      <div style={{ fontSize: 12, color: '#64748b', marginTop: 3 }}>Click "Retry" once Docker is fully running</div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Note */}
+                <div style={{ background: '#e0e7ff', border: '1px solid #c7d2fe', borderRadius: 10, padding: 12, marginBottom: 20 }}>
+                  <div style={{ display: 'flex', gap: 8, fontSize: 12, color: '#3730a3' }}>
+                    <span style={{ fontWeight: 600, marginTop: '2px' }}>💡</span>
+                    <span>Don't have Docker? <a href="https://www.docker.com/products/docker-desktop" target="_blank" rel="noopener noreferrer" style={{ color: '#6366f1', textDecoration: 'underline', fontWeight: 500 }}>Download Docker Desktop</a></span>
+                  </div>
+                </div>
+              </div>
+              <div className="ti-modal-foot" style={{ borderTop: '1px solid #f1f5f9', paddingTop: 16 }}>
+                <button 
+                  className="ti-modal-cancel" 
+                  onClick={() => setDockerModalOpen(false)} 
+                  disabled={dockerLoading}
+                  style={{ background: '#f8fafc', color: '#64748b' }}
+                >
+                  Cancel
+                </button>
+                <button 
+                  className="ti-modal-force" 
+                  onClick={() => void checkDockerAndProceedToLogin()} 
+                  disabled={dockerLoading}
+                  style={{ background: dockerLoading ? '#cbd5e1' : 'linear-gradient(135deg, #6366f1, #8b5cf6)', color: '#fff' }}
+                >
+                  {dockerLoading ? (
+                    <><Loader size={15} className="spin" style={{ marginRight: 4 }} /> Checking...</>
+                  ) : (
+                    <><AlertCircle size={15} style={{ marginRight: 4 }} /> Retry</>
                   )}
                 </button>
               </div>
@@ -1019,8 +1253,30 @@ export default function NoAccessError() {
                   <div className="ti-pill"><Zap size={12} /> Instant access</div>
                 </div>
 
-                <button className="ti-btn-primary" onClick={() => setShowLogin(true)}>
-                  Login to Continue <ArrowRight size={16} />
+                <button 
+                  className="ti-btn-primary" 
+                  onClick={(e) => {
+                    console.log('[BUTTON_CLICK_DEBUG] Button clicked directly');
+                    e.preventDefault();
+                    e.stopPropagation();
+                    console.log('[LOGIN_BUTTON_CLICK] Button clicked, event type:', e.type);
+                    void checkDockerAndProceedToLogin();
+                  }}
+                  style={{ 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    justifyContent: 'center', 
+                    gap: '8px',
+                    width: '100%',
+                    position: 'relative',
+                    overflow: 'hidden'
+                  }}
+                >
+                  {dockerLoading ? (
+                    <><Loader size={16} className="spin" /> Checking Docker...</>
+                  ) : (
+                    <><Lock size={16} /> Login to Continue</>
+                  )}
                 </button>
 
                 <div className="ti-links-row" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginTop: '16px' }}>

@@ -52,7 +52,7 @@ When the user installs and runs TrustINN for the first time on Windows:
 2. 🔗 **Docker Install Prompt**: If not installed, user is offered to download Docker Desktop
 3. ⏱️ **Docker Running Check**: Application verifies Docker daemon is running (`docker ps`)
 4. ▶️ **Start Docker Prompt**: If not running, prompts user to start Docker
-5. 📥 **Image Pulling**: Automatically pulls `rajeshbyreddy95/trustinn-tools:4.1.2` with progress bar
+5. 📥 **Image Pulling**: Automatically pulls `rajeshbyreddy95/trustinn-tools:latest` with progress bar
 6. 📂 **Results Folder**: Prompts user to select where to save analysis results
 7. ✅ **Complete**: Application is ready to use
 
@@ -167,7 +167,7 @@ Users can manually edit `config.ini` to change settings without reinstalling.
 ### Docker Image Pull Fails
 
 - Check internet connection
-- Manually pull: `docker pull rajeshbyreddy95/trustinn-tools:4.1.2`
+- Manually pull: `docker pull rajeshbyreddy95/trustinn-tools:latest`
 - Restart application
 
 ### Update Not Showing
