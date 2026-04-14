@@ -21,7 +21,7 @@ interface IUser extends Document {
     endDate?: Date;
     paymentId?: mongoose.Types.ObjectId;
   };
-  settings?: any;
+  settings?: Record<string, unknown>;
   otpCode?: string;
   otpExpiresAt?: Date;
   isEmailVerified: boolean;

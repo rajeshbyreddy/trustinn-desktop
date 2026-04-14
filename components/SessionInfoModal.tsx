@@ -3,9 +3,18 @@
 import React, { useState, useEffect } from 'react';
 import { X } from 'lucide-react';
 
+interface UserData {
+  email?: string;
+  firstName?: string;
+  lastName?: string;
+  isPremium?: boolean;
+  trialCount?: number;
+  [key: string]: unknown;
+}
+
 interface SessionCheckModalProps {
   isOpen: boolean;
-  user: any;
+  user: UserData | null;
   onClose: () => void;
 }
 
@@ -27,16 +36,17 @@ async function navigateToRoute(route: string): Promise<void> {
 }
 
 export function SessionCheckModal({ isOpen, user, onClose }: SessionCheckModalProps) {
-  const [userData, setUserData] = useState<any>(null);
+  const [userData, setUserData] = useState<UserData | null>(null);
   const [lastUpdated, setLastUpdated] = useState<string>('Never');
 
   // Load user data from sessionStorage when modal opens
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (isOpen) {
       const userStr = sessionStorage.getItem('trustinn_user');
       if (userStr) {
         try {
-          const parsedUser = JSON.parse(userStr);
+          const parsedUser: UserData = JSON.parse(userStr);
           setUserData(parsedUser);
           setLastUpdated(new Date().toLocaleTimeString());
         } catch (e) {

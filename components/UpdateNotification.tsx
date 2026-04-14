@@ -18,6 +18,12 @@ interface DownloadProgress {
   total: number;
 }
 
+interface ElectronAPI {
+  onUpdateAvailable?: (callback: (info: UpdateInfo) => void) => void;
+  onUpdateProgress?: (callback: (progress: DownloadProgress) => void) => void;
+  onUpdateDownloaded?: (callback: () => void) => void;
+}
+
 export function UpdateNotification() {
   const [updateAvailable, setUpdateAvailable] = useState(false);
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
@@ -26,7 +32,7 @@ export function UpdateNotification() {
   const [dismissed, setDismissed] = useState(false);
 
   useEffect(() => {
-    if (typeof window !== "undefined" && (window as any).electronAPI) {
+    if (typeof window !== "undefined" && (window as unknown as { electronAPI?: ElectronAPI }).electronAPI) {
       const handleUpdateAvailable = (info: UpdateInfo) => {
         console.log("Update available:", info);
         setUpdateInfo(info);
@@ -43,9 +49,10 @@ export function UpdateNotification() {
         setDownloadProgress(null);
       };
 
-      (window as any).electronAPI?.onUpdateAvailable?.(handleUpdateAvailable);
-      (window as any).electronAPI?.onUpdateProgress?.(handleDownloadProgress);
-      (window as any).electronAPI?.onUpdateDownloaded?.(handleUpdateDownloaded);
+      const electronAPI = (window as unknown as { electronAPI?: ElectronAPI }).electronAPI;
+      electronAPI?.onUpdateAvailable?.(handleUpdateAvailable);
+      electronAPI?.onUpdateProgress?.(handleDownloadProgress);
+      electronAPI?.onUpdateDownloaded?.(handleUpdateDownloaded);
     }
   }, []);
 
