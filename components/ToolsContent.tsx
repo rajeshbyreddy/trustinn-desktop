@@ -858,16 +858,23 @@ export default function ToolsContent() {
       // ✅ Add cache-busting parameters and headers to force fresh data from backend
       const timestamp = Date.now();
       
-      // ✅ In Electron with file:// protocol, proxy to localhost:3000
+      // ✅ Determine API endpoint based on environment
+      // In packaged Electron app (file:// protocol), call NitMiner API directly
+      // In dev mode (localhost), can use local proxy
       let apiUrl = `/api/auth/validate-token?t=${timestamp}`;
+      
       if (typeof window !== 'undefined' && window.location.protocol === 'file:') {
-        apiUrl = `http://localhost:3000/api/auth/validate-token?t=${timestamp}`;
-        console.log(`[EXEC] Using localhost URL for file:// protocol:`, apiUrl);
+        // Packaged Electron app - call NitMiner API directly
+        const NITMINER_API = process.env.REACT_APP_NITMINER_API || 'https://api.nitminer.com';
+        apiUrl = `${NITMINER_API}/api/auth/validate-token?t=${timestamp}`;
+        console.log(`[EXEC] Production mode - calling NitMiner directly:`, apiUrl);
+      } else {
+        console.log(`[EXEC] Dev mode - calling local API`);
       }
 
-      console.log(`[EXEC] Fetching fresh token validation from ${window.location.protocol === 'file:' ? 'localhost' : 'local'} API (timestamp: ${timestamp})...`);
+      console.log(`[EXEC] Fetching fresh token validation (timestamp: ${timestamp})...`);
 
-      // ✅ Call endpoint to get fresh data from database
+      // ✅ Call endpoint to get fresh data from backend
       const response = await fetch(apiUrl, {
         method: "GET",
         cache: "no-store",
@@ -1064,11 +1071,17 @@ export default function ToolsContent() {
 
       console.log("[TRIAL] Deducting 1 trial from user account");
       
-      // ✅ In Electron with file:// protocol, proxy to localhost:3000
+      // ✅ Determine API endpoint based on environment
+      // In packaged Electron app (file:// protocol), call NitMiner API directly
+      // In dev mode (localhost), can use local proxy
       let consumeUrl = "/api/auth/consume-trial";
       if (typeof window !== 'undefined' && window.location.protocol === 'file:') {
-        consumeUrl = "http://localhost:3000/api/auth/consume-trial";
-        console.log(`[TRIAL] Using localhost URL for file:// protocol:`, consumeUrl);
+        // Packaged Electron app - call NitMiner API directly
+        const NITMINER_API = process.env.REACT_APP_NITMINER_API || 'https://api.nitminer.com';
+        consumeUrl = `${NITMINER_API}/api/auth/consume-trial`;
+        console.log(`[TRIAL] Production mode - calling NitMiner directly:`, consumeUrl);
+      } else {
+        console.log(`[TRIAL] Dev mode - calling local API`);
       }
 
       const response = await fetch(consumeUrl, {
