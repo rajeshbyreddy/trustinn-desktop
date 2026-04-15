@@ -1,154 +1,189 @@
 import { NextRequest, NextResponse } from 'next/server';
-import jwt from 'jsonwebtoken';
 import dbConnect from '@/lib/mongodb';
 import User from '@/lib/models/User';
 
-const NITMINER_API = process.env.NITMINER_API_URL || 'https://www.nitminer.com';
+// ✅ Not compatible with static export - only works in dev server mode
+export const dynamic = 'error';
+
+const NITMINER_API = process.env.NITMINER_API_URL || 'https://api.nitminer.com';
 
 /**
- * Validates JWT token and returns FRESH user data from MongoDB
- * Key difference: Returns database values for isPremium and trialCount, not token values
+ * Validates JWT token via NitMiner API, then fetches FRESH user data from LOCAL MongoDB
+ * 
+ * Flow:
+ * 1. Call NitMiner to validate token signature (https://api.nitminer.com/api/auth/validate-token)
+ * 2. Extract email from NitMiner response
+ * 3. Query LOCAL MongoDB for fresh user data (real trial count, premium status)
+ * 4. Return local database values + NitMiner validation result
+ * 
+ * This ensures we always get the latest trial count from the database, not from token payload
  */
-export async function POST(request: NextRequest) {
+
+async function validateTokenAndGetFreshData(token: string | null) {
+  if (!token) {
+    return NextResponse.json(
+      { success: false, error: 'Token is required' },
+      { status: 400 }
+    );
+  }
+
   try {
-    const { token } = await request.json();
+    // Step 1: Validate token with NitMiner API
+    console.log('[validate-token] Validating token with NitMiner API...');
+    const nitminerResponse = await fetch(`${NITMINER_API}/api/auth/validate-token`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      cache: 'no-store',
+    });
 
-    if (!token) {
+    if (!nitminerResponse.ok) {
+      console.error('[validate-token] NitMiner validation failed:', nitminerResponse.status);
       return NextResponse.json(
-        { error: 'Token is required' },
-        { status: 400 }
+        { success: false, error: 'Token validation failed' },
+        { status: 401 }
       );
     }
 
-    // Step 1: Verify JWT signature with NitMiner/TrustInn secret
-    let decoded: any = null;
-    try {
-      const nitminerSecret = process.env.NITMINER_JWT_SECRET || process.env.NEXTAUTH_SECRET || 'nitminer-secret-key-2026';
-      decoded = jwt.verify(token, nitminerSecret);
-      console.log('[validate-token] JWT verified with NitMiner secret for user:', decoded.id || decoded.email);
-    } catch (jwtError) {
-      console.warn('[validate-token] JWT verification with NitMiner secret failed, trying TrustInn secret:', (jwtError as Error).message);
-      
-      try {
-        decoded = jwt.verify(token, process.env.JWT_SECRET || 'trustinn-secret-key-2026-nitminer');
-        console.log('[validate-token] JWT verified with TrustInn secret for user:', decoded.id || decoded.email);
-      } catch (trustinnJwtError) {
-        console.error('[validate-token] JWT verification failed for all known secrets:', trustinnJwtError);
-        return NextResponse.json(
-          { isValid: false, error: 'Invalid token signature' },
-          { status: 401 }
-        );
-      }
-    }
+    const nitminerData = await nitminerResponse.json();
+    console.log('[validate-token] NitMiner response:', nitminerData);
 
-    // Step 1.5: Enforce active-session check at NitMiner so invalidated device tokens stop immediately.
-    try {
-      const sessionValidateResponse = await fetch(`${NITMINER_API}/api/auth/session/validate-token`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify({ token, email: decoded?.email }),
-        cache: 'no-store',
-      });
-
-      const sessionData = await sessionValidateResponse.json().catch(() => ({}));
-
-      if (!sessionValidateResponse.ok || sessionData?.isValid !== true) {
-        console.warn('[validate-token] NitMiner session validation failed:', {
-          status: sessionValidateResponse.status,
-          reason: sessionData?.reason,
-        });
-        return NextResponse.json(
-          { isValid: false, error: 'Session invalidated. Please login again.' },
-          { status: 401 }
-        );
-      }
-    } catch (sessionValidationError) {
-      console.error('[validate-token] NitMiner session validation request failed:', sessionValidationError);
+    if (!nitminerData.success || !nitminerData.data) {
+      console.error('[validate-token] Invalid NitMiner response structure:', nitminerData);
       return NextResponse.json(
-        { isValid: false, error: 'Unable to verify session right now. Please login again.' },
-        { status: 503 }
+        { success: false, error: 'Invalid token' },
+        { status: 401 }
       );
     }
 
-    // Step 2: Connect to database
+    // Step 2: Extract user email from NitMiner response
+    const userEmail = nitminerData.data?.email;
+    const nitminerUserId = nitminerData.data?.userId;
+
+    if (!userEmail) {
+      console.error('[validate-token] No email in NitMiner response');
+      return NextResponse.json(
+        { success: false, error: 'Invalid token data' },
+        { status: 401 }
+      );
+    }
+
+    // Step 3: Connect to LOCAL MongoDB and fetch FRESH user data
+    console.log('[validate-token] Fetching fresh user data from local MongoDB for:', userEmail);
     await dbConnect();
 
-    // Step 3: Fetch FRESH user data from MongoDB (this is critical!)
-    // Handle both TrustInn token format (id) and NitMiner format (_id or email)
+    // Query by email (primary) or userId (fallback)
     let user;
-    const userId = decoded.id || decoded._id || decoded.mongoId;
-    const userEmail = decoded.email;
-    
-    if (userId) {
-      user = await User.findById(userId);
-      console.log('[validate-token] User lookup by ID:', userId, user ? 'found' : 'not found');
-    } else if (userEmail) {
+    if (nitminerUserId) {
+      user = await User.findById(nitminerUserId);
+      if (!user) {
+        console.log('[validate-token] User not found by ID, trying email...');
+        user = await User.findOne({ email: userEmail.toLowerCase() });
+      }
+    } else {
       user = await User.findOne({ email: userEmail.toLowerCase() });
-      console.log('[validate-token] User lookup by email:', userEmail, user ? 'found' : 'not found');
     }
-    
+
     if (!user) {
-      console.error('[validate-token] User not found in database:', { userId, userEmail });
+      console.error('[validate-token] User not found in local database:', userEmail);
       return NextResponse.json(
-        { isValid: false, error: 'User not found' },
+        { success: false, error: 'User not found in local database' },
         { status: 404 }
       );
     }
 
-    console.log('[validate-token] Fresh user data fetched from DB:', {
-      email: user.email,
-      isPremium: user.isPremium,
-      trialCount: user.trialCount
-    });
-
-    // Step 4: Return fresh user data from database
-    // IMPORTANT: isPremium and trialCount come from DB, not from token
-    // Handle different field name variations from database
+    // Step 4: Extract fresh trial data from LOCAL database (not from token/NitMiner)
     const trialCount = Number(user.trialCount ?? user.noOfTrails ?? 0);
     const isPremium = Boolean(user.isPremium ?? user.hasPremium ?? false);
-    
+
+    console.log('[validate-token] Fresh user data from LOCAL DB:', {
+      email: user.email,
+      trialCount: trialCount,
+      isPremium: isPremium,
+      timestamp: new Date().toISOString()
+    });
+
+    // Step 5: Return FRESH user data from local database (NOT NitMiner values)
     const response = NextResponse.json(
       {
-        isValid: true,
-        user: {
-          id: user._id.toString(),
-          mongoId: user._id.toString(),
-          firstName: user.firstName,
-          lastName: user.lastName,
-          name: `${user.firstName || ''} ${user.lastName || ''}`.trim(),
+        success: true,
+        message: 'Token is valid',
+        data: {
+          userId: user._id?.toString() || nitminerUserId,
           email: user.email,
-          role: user.role || 'user',
-          isPremium: isPremium,
-          trialCount: trialCount,
-          isEmailVerified: user.isEmailVerified || false,
-          subscription: {
-            plan: user.subscription?.plan || null,
-            status: user.subscription?.status || null,
-            startDate: user.subscription?.startDate || null,
-            endDate: user.subscription?.endDate || null
-          }
+          name: `${user.firstName || ''} ${user.lastName || ''}`.trim() || nitminerData.data?.name,
+          isPremium: isPremium,  // ← FROM LOCAL DB, NOT NitMiner
+          trialCount: trialCount,  // ← FROM LOCAL DB, NOT NitMiner
+          role: user.role || 'user'
         },
         token: token,
-        expiresAt: new Date(decoded.exp * 1000).toISOString(),
-        issuedAt: new Date(decoded.iat * 1000).toISOString()
       },
       { status: 200 }
     );
-    
+
     // Add cache-busting headers - CRITICAL to prevent stale data
     response.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
     response.headers.set('Pragma', 'no-cache');
     response.headers.set('Expires', '0');
-    
+    response.headers.set('X-Content-Type-Options', 'nosniff');
+
     return response;
   } catch (error) {
     console.error('[validate-token] Unexpected error:', error);
     const errorMsg = error instanceof Error ? error.message : String(error);
     return NextResponse.json(
-      { isValid: false, error: `Validation failed: ${errorMsg}` },
+      { success: false, error: `Validation failed: ${errorMsg}` },
+      { status: 500 }
+    );
+  }
+}
+
+// GET handler: Extract token from Authorization header
+export async function GET(request: NextRequest) {
+  try {
+    const authHeader = request.headers.get('Authorization') || '';
+    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
+
+    console.log('[validate-token GET] Validating token from Authorization header');
+    return validateTokenAndGetFreshData(token);
+  } catch (error) {
+    console.error('[validate-token GET] Unexpected error:', error);
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    return NextResponse.json(
+      { success: false, error: `Validation failed: ${errorMsg}` },
+      { status: 500 }
+    );
+  }
+}
+
+// POST handler: Extract token from request body or Authorization header
+export async function POST(request: NextRequest) {
+  try {
+    let token: string | null = null;
+
+    // Try to get token from body first
+    try {
+      const body = await request.json();
+      token = body.token;
+    } catch {
+      // If body parsing fails, try Authorization header
+    }
+
+    // Fallback to Authorization header
+    if (!token) {
+      const authHeader = request.headers.get('Authorization') || '';
+      token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
+    }
+
+    console.log('[validate-token POST] Validating token');
+    return validateTokenAndGetFreshData(token);
+  } catch (error) {
+    console.error('[validate-token POST] Unexpected error:', error);
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    return NextResponse.json(
+      { success: false, error: `Validation failed: ${errorMsg}` },
       { status: 500 }
     );
   }

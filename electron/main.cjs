@@ -22,6 +22,8 @@ const PERSIST_RESULTS_DEFAULT = process.env.TRUSTINN_PERSIST_RESULTS === "1";
 const IS_MAC = process.platform === "darwin";
 const IS_WIN = process.platform === "win32";
 let activeToolProcess = null;
+let activeDockerPullProcess = null;
+let isDockerPullCancelled = false;
 let mainWindow = null;
 let configuredResultsDir = DEFAULT_RESULTS_DIR;
 let hasRegisteredStaticAssetRewrite = false;
@@ -78,29 +80,68 @@ function rewriteExportedAssetUrl(rawUrl) {
   if (outIndex < 0) return "";
 
   const afterOut = decodedPath.slice(outIndex + outMarker.length);
+  
+  // Debug: Log all image requests
+  if (afterOut.includes("DemoGallery") || afterOut.includes(".jpg") || afterOut.includes(".png")) {
+    console.log("[ASSET_REWRITE] Original path afterOut:", afterOut);
+  }
+  
+  // Handle nested route _next/* assets: rewrite from out/tools/_next/* to out/_next/*.
   const nestedNextMarker = "/_next/";
   const nestedNextIndex = afterOut.indexOf(nestedNextMarker);
+  if (nestedNextIndex > 0) {
+    const rewrittenPath =
+      decodedPath.slice(0, outIndex + outMarker.length) +
+      "_next/" +
+      afterOut.slice(nestedNextIndex + nestedNextMarker.length);
 
-  // Only rewrite nested route assets like out/tools/_next/* to out/_next/*.
-  if (nestedNextIndex <= 0) return "";
+    if (rewrittenPath !== decodedPath) {
+      parsed.pathname = rewrittenPath;
+      console.log("[ASSET_REWRITE] Rewritten _next path:", rewrittenPath);
+      return parsed.toString();
+    }
+  }
 
-  const rewrittenPath =
-    decodedPath.slice(0, outIndex + outMarker.length) +
-    "_next/" +
-    afterOut.slice(nestedNextIndex + nestedNextMarker.length);
+  // Handle public folder assets from nested routes: rewrite from out/tools/DemoGallery/* to out/DemoGallery/*.
+  const pathSegments = afterOut.split("/").filter(Boolean);
+  if (pathSegments.length > 1) {
+    // List of known public asset directories to check
+    const publicDirs = ["DemoGallery"];
+    for (const publicDir of publicDirs) {
+      if (pathSegments.includes(publicDir)) {
+        const pubDirIndex = pathSegments.indexOf(publicDir);
+        if (pubDirIndex > 0) {
+          // Reconstruct: out/<publicDir>/<rest of path>
+          const rewrittenSegments = [pathSegments[pubDirIndex], ...pathSegments.slice(pubDirIndex + 1)];
+          const rewrittenPath =
+            decodedPath.slice(0, outIndex + outMarker.length) +
+            rewrittenSegments.join("/");
 
-  if (rewrittenPath === decodedPath) return "";
+          if (rewrittenPath !== decodedPath) {
+            parsed.pathname = rewrittenPath;
+            console.log("[ASSET_REWRITE] Rewritten public folder path from:", afterOut, "to:", rewrittenPath.slice(rewrittenPath.indexOf(outMarker) + outMarker.length));
+            return parsed.toString();
+          }
+        }
+      }
+    }
+  }
 
-  parsed.pathname = rewrittenPath;
-  return parsed.toString();
+  return "";
 }
 
 function registerStaticAssetRewrite(session) {
   if (hasRegisteredStaticAssetRewrite || !session) return;
 
   session.webRequest.onBeforeRequest({ urls: ["file://*/*"] }, (details, callback) => {
-    const redirectURL = rewriteExportedAssetUrl(details.url);
+    const url = details.url;
+    if (url.includes("DemoGallery") || url.includes("G1") || url.includes("G2") || url.includes("G3") || url.includes("G4") || url.includes("G5") || url.includes("G9") || url.includes("G10") || url.includes("G12") || url.includes("G13")) {
+      console.log("[WEBRequest_INTERCEPT] Intercepted URL:", url);
+    }
+    
+    const redirectURL = rewriteExportedAssetUrl(url);
     if (redirectURL) {
+      console.log("[WEBREQUEST_REWRITE] Redirecting to:", redirectURL);
       callback({ redirectURL });
       return;
     }
@@ -554,9 +595,10 @@ function createMainWindow() {
     // Load static export files in development for better Electron compatibility
     const indexPath = resolveStaticRouteHtml("/");
     if (indexPath) {
+      console.log("[DEV_MODE] Loading static HTML from:", indexPath);
       mainWindow.loadFile(indexPath);
     } else {
-      console.error("[MAIN] Could not find static index.html in development mode");
+      console.warn("[DEV_MODE] Static HTML not found, falling back to localhost:3000");
       mainWindow.loadURL("http://localhost:3000"); // fallback
     }
     mainWindow.webContents.openDevTools({ mode: "detach" });
@@ -1447,8 +1489,13 @@ exit 1
   function pullDockerImageWithRetry(imageName, maxRetries = 3) {
     return new Promise((resolve) => {
       let attempt = 0;
+      isDockerPullCancelled = false;
 
       const attemptPull = () => {
+        if (isDockerPullCancelled) {
+          return resolve({ ok: false, cancelled: true, error: "Docker pull cancelled by user" });
+        }
+
         attempt++;
         console.log(`[IPC] Attempt ${attempt}/${maxRetries} to pull Docker image: ${imageName}`);
 
@@ -1465,6 +1512,7 @@ exit 1
           const proc = spawn("docker", pullArgs, {
             stdio: ["ignore", "pipe", "pipe"],
           });
+          activeDockerPullProcess = proc;
 
           let output = "";
           const seen = new Set();
@@ -1496,6 +1544,13 @@ exit 1
           });
 
           proc.on("close", (code) => {
+            activeDockerPullProcess = null;
+
+            if (isDockerPullCancelled) {
+              console.log("[IPC] Docker pull cancelled by user");
+              return resolve({ ok: false, cancelled: true, error: "Docker pull cancelled by user" });
+            }
+
             if (code === 0) {
               console.log(`[IPC] Successfully pulled Docker image on attempt ${attempt}`);
               
@@ -1521,6 +1576,12 @@ exit 1
           });
 
           proc.on("error", (error) => {
+            activeDockerPullProcess = null;
+
+            if (isDockerPullCancelled) {
+              return resolve({ ok: false, cancelled: true, error: "Docker pull cancelled by user" });
+            }
+
             const errorMsg = error instanceof Error ? error.message : "Failed to pull Docker image";
             console.error(`[IPC] Process error on attempt ${attempt}: ${errorMsg}`);
 
@@ -1562,6 +1623,29 @@ exit 1
       const errorMsg = error instanceof Error ? error.message : "Failed to pull Docker image";
       console.error(`[IPC] Unexpected error: ${errorMsg}`);
       return { ok: false, error: errorMsg };
+    }
+  });
+
+  ipcMain.handle("docker:stop-pull-image", async () => {
+    try {
+      isDockerPullCancelled = true;
+
+      if (activeDockerPullProcess && !activeDockerPullProcess.killed) {
+        activeDockerPullProcess.kill("SIGTERM");
+        console.log("[IPC] Docker pull process stopped by user");
+      }
+
+      if (mainWindow && mainWindow.webContents) {
+        mainWindow.webContents.send("setup:status", { message: "Setup cancelled by user", progress: 0 });
+      }
+
+      return { ok: true, stopped: true };
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : "Failed to stop Docker pull";
+      console.error(`[IPC] Error stopping Docker pull: ${errorMsg}`);
+      return { ok: false, stopped: false, error: errorMsg };
+    }
+  });
 
   // Setup auto-updater
   setupAutoUpdater();

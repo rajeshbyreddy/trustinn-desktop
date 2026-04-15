@@ -5,30 +5,30 @@ import './DemoGallery.css';
 
 const DEFAULT_IMAGES = [
   {
-    src: 'https://www.nitminer.com/images/Gallery/G2.png',
+    src: '/DemoGallery/G2.png',
     alt: 'Abstract art'
   },
   {
-    src: 'https://www.nitminer.com/images/Gallery/G13.jpg',
+    src: '/DemoGallery/G13.jpg',
     alt: 'Modern sculpture'
   },
   {
-    src: 'https://www.nitminer.com/images/Gallery/G4.png',
+    src: '/DemoGallery/G4.png',
     alt: 'Digital artwork'
   },
   {
-    src: 'https://www.nitminer.com/images/Gallery/G9.png',
+    src: '/DemoGallery/G9.png',
     alt: 'Contemporary art'
   },
   {
-    src: 'https://www.nitminer.com/images/Gallery/G5.png',
+    src: '/DemoGallery/G5.png',
     alt: 'Geometric pattern'
   },
   {
-    src: 'https://www.nitminer.com/images/Gallery/G10.jpg',
+    src: '/DemoGallery/G10.jpg',
     alt: 'Textured surface'
   },
-  { src: 'https://www.nitminer.com/images/Gallery/G12.jpg', alt: 'Social media image' }
+  { src: '/DemoGallery/G12.jpg', alt: 'Social media image' }
 ];
 
 const DEFAULTS = {
@@ -44,6 +44,12 @@ const wrapAngleSigned = deg => {
   const a = (((deg + 180) % 360) + 360) % 360;
   return a - 180;
 };
+const resolveGalleryAssetPath = (src) => {
+  if (typeof window === 'undefined') return src;
+  if (window.location.protocol !== 'file:') return src;
+  if (typeof src !== 'string' || !src.startsWith('/')) return src;
+  return `.${src}`;
+};
 const getDataNumber = (el, name, fallback) => {
   const attr = el.dataset[name] ?? el.getAttribute(`data-${name}`);
   const n = attr == null ? NaN : parseFloat(attr);
@@ -58,14 +64,14 @@ function normalizeImagePool(pool) {
       if (typeof image === 'string') {
         const src = image.trim();
         if (!src) return null;
-        return { src, alt: '' };
+        return { src: resolveGalleryAssetPath(src), alt: '' };
       }
 
       if (image && typeof image === 'object') {
         const src = typeof image.src === 'string' ? image.src.trim() : '';
         if (!src) return null;
         const alt = typeof image.alt === 'string' ? image.alt : '';
-        return { src, alt };
+        return { src: resolveGalleryAssetPath(src), alt };
       }
 
       return null;

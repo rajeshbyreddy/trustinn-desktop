@@ -88,6 +88,7 @@ declare global {
       removeDockerImage: (imageName: string) => Promise<{ ok: boolean; message?: string; error?: string }>;
       checkDockerImageExists: (imageName: string) => Promise<{ ok: boolean; exists: boolean; error?: string }>;
       pullDockerImage: (imageName: string) => Promise<{ ok: boolean; message?: string; error?: string }>;
+      stopDockerPullImage: () => Promise<{ ok: boolean; stopped: boolean; error?: string }>;
       onSetupPullingImage: (callback: () => void) => void;
       onSetupProgress: (callback: (progress: number) => void) => void;
       onSetupStatus: (callback: (payload: { message?: string; progress?: number }) => void) => void;

@@ -842,6 +842,7 @@ export default function ToolsContent() {
   const [imageSetupLoading, setImageSetupLoading] = useState(false);
   const [imageSetupStatus, setImageSetupStatus] = useState("Checking tool configuration...");
   const [imageSetupProgress, setImageSetupProgress] = useState(0);
+  const [isStoppingSetup, setIsStoppingSetup] = useState(false);
   const DOCKER_IMAGE_NAME = "rajeshbyreddy95/trustinn-tools:latest";
   
   
@@ -856,16 +857,27 @@ export default function ToolsContent() {
 
       // ✅ Add cache-busting parameters and headers to force fresh data from backend
       const timestamp = Date.now();
-      console.log(`[EXEC] Fetching fresh token validation (timestamp: ${timestamp})...`);
+      
+      // ✅ In Electron with file:// protocol, proxy to localhost:3000
+      let apiUrl = `/api/auth/validate-token?t=${timestamp}`;
+      if (typeof window !== 'undefined' && window.location.protocol === 'file:') {
+        apiUrl = `http://localhost:3000/api/auth/validate-token?t=${timestamp}`;
+        console.log(`[EXEC] Using localhost URL for file:// protocol:`, apiUrl);
+      }
 
-      const response = await fetch(`https://api.nitminer.com/api/auth/validate-token?t=${timestamp}`, {
+      console.log(`[EXEC] Fetching fresh token validation from ${window.location.protocol === 'file:' ? 'localhost' : 'local'} API (timestamp: ${timestamp})...`);
+
+      // ✅ Call endpoint to get fresh data from database
+      const response = await fetch(apiUrl, {
         method: "GET",
+        cache: "no-store",
         headers: {
           "Authorization": `Bearer ${token}`,
           "Content-Type": "application/json",
           "Cache-Control": "no-cache, no-store, must-revalidate",
           "Pragma": "no-cache",
           "Expires": "0",
+          "X-Requested-At": String(timestamp),
         },
       });
 
@@ -884,15 +896,18 @@ export default function ToolsContent() {
         return false;
       }
 
-      const { trialCount = 0, isPremium = false } = data.data;
-      console.log(`[EXEC] User eligibility - Trials: ${trialCount}, Premium: ${isPremium}`);
+      const trialCount = Number(data.data?.trialCount ?? 0);
+      const isPremium = data.data?.isPremium === true || data.data?.isPremium === "true";
+      const safeTrialCount = Number.isFinite(trialCount) ? trialCount : 0;
+      console.log(`[EXEC] User eligibility - Trials: ${safeTrialCount}, Premium: ${isPremium}`);
 
-      // Update sessionStorage with fresh user data from backend
+      // Update frontend state from backend truth
       sessionStorage.setItem("trustinn_user", JSON.stringify(data.data));
+      setUserData(data.data);
       console.log("[EXEC] Updated sessionStorage with fresh user data");
 
       // ✅ CRITICAL: If user has 0 trials and not premium, block ALL operations
-      if (trialCount === 0 && !isPremium) {
+      if (safeTrialCount <= 0 && !isPremium) {
         console.log("[EXEC] User not eligible - no trials and not premium");
         setTrialsExhausted(true);  // ← Update UI immediately
         setShowNoTrialsModal(true);  // ← Show modal card
@@ -912,8 +927,10 @@ export default function ToolsContent() {
       }
 
       // User can execute if they have trials OR are premium
-      if (trialCount > 0 || isPremium) {
+      if (safeTrialCount > 0 || isPremium) {
         console.log("[EXEC] User eligible to execute");
+        setTrialsExhausted(false);
+        setShowNoTrialsModal(false);  // ← Also clear the modal
         return true;
       } else {
         console.log("[EXEC] User not eligible - no trials and not premium");
@@ -957,6 +974,7 @@ export default function ToolsContent() {
     try {
       setShowImageSetupModal(true);
       setImageSetupLoading(true);
+      setIsStoppingSetup(false);
       setImageSetupProgress(0);
       setImageSetupStatus("Checking tool configuration...");
 
@@ -967,6 +985,7 @@ export default function ToolsContent() {
       if (!checkResult || !checkResult.ok) {
         console.error("[DOCKER] Failed to check image:", checkResult?.error);
         setImageSetupStatus("Error checking configuration");
+        setImageSetupLoading(false);
         return false;
       }
 
@@ -988,7 +1007,12 @@ export default function ToolsContent() {
       
       if (!pullResult || !pullResult.ok) {
         console.error("[DOCKER] Failed to pull image:", pullResult?.error);
-        setImageSetupStatus(`Error: ${pullResult?.error || "Failed to download"}`);
+        if (pullResult?.error?.toLowerCase().includes("cancelled")) {
+          setImageSetupStatus("Setup cancelled by user");
+        } else {
+          setImageSetupStatus(`Error: ${pullResult?.error || "Failed to download"}`);
+        }
+        setImageSetupLoading(false);
         return false;
       }
 
@@ -1002,7 +1026,30 @@ export default function ToolsContent() {
       const errorMsg = error instanceof Error ? error.message : "Unknown error";
       console.error("[DOCKER] Error ensuring image exists:", error);
       setImageSetupStatus(`Error: ${errorMsg}`);
+      setImageSetupLoading(false);
       return false;
+    }
+  };
+
+  const stopImageSetup = async () => {
+    if (!imageSetupLoading || isStoppingSetup) return;
+    setIsStoppingSetup(true);
+    setImageSetupStatus("Stopping setup...");
+    try {
+      const result = await window.electronAPI?.stopDockerPullImage?.();
+      if (result?.ok) {
+        setImageSetupLoading(false);
+        setImageSetupProgress(0);
+        setImageSetupStatus("Setup cancelled by user");
+        setTimeout(() => setShowImageSetupModal(false), 500);
+      } else {
+        setImageSetupStatus(`Error: ${result?.error || "Unable to stop setup"}`);
+      }
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : "Unable to stop setup";
+      setImageSetupStatus(`Error: ${errorMsg}`);
+    } finally {
+      setIsStoppingSetup(false);
     }
   };
 
@@ -1017,11 +1064,22 @@ export default function ToolsContent() {
 
       console.log("[TRIAL] Deducting 1 trial from user account");
       
-      const response = await fetch("https://api.nitminer.com/api/auth/consume-trial", {
+      // ✅ In Electron with file:// protocol, proxy to localhost:3000
+      let consumeUrl = "/api/auth/consume-trial";
+      if (typeof window !== 'undefined' && window.location.protocol === 'file:') {
+        consumeUrl = "http://localhost:3000/api/auth/consume-trial";
+        console.log(`[TRIAL] Using localhost URL for file:// protocol:`, consumeUrl);
+      }
+
+      const response = await fetch(consumeUrl, {
         method: "POST",
+        cache: "no-store",
         headers: {
           "Authorization": `Bearer ${token}`,
           "Content-Type": "application/json",
+          "Cache-Control": "no-cache, no-store, must-revalidate",
+          "Pragma": "no-cache",
+          "Expires": "0",
         },
       });
 
@@ -1038,14 +1096,17 @@ export default function ToolsContent() {
         return false;
       }
 
-      const { trialCount = 0, isPremium = false } = data.data;
-      console.log(`[TRIAL] After deduction - Trials: ${trialCount}, Premium: ${isPremium}`);
+      const trialCount = Number(data.data?.trialCount ?? 0);
+      const isPremium = data.data?.isPremium === true || data.data?.isPremium === "true";
+      const safeTrialCount = Number.isFinite(trialCount) ? trialCount : 0;
+      console.log(`[TRIAL] After deduction - Trials: ${safeTrialCount}, Premium: ${isPremium}`);
 
-      // Update sessionStorage with fresh user data
+      // Update frontend state from backend truth
       sessionStorage.setItem("trustinn_user", JSON.stringify(data.data));
+      setUserData(data.data);
 
       // If trials reached 0 and user is not premium, remove Docker image
-      if (trialCount === 0 && !isPremium) {
+      if (safeTrialCount <= 0 && !isPremium) {
         console.log("[TRIAL] Trials exhausted and user not premium. Removing Docker image...");
         setTrialsExhausted(true);  // ← Update UI banner
         setShowNoTrialsModal(true);  // ← Show modal card
@@ -1166,27 +1227,29 @@ export default function ToolsContent() {
           }
         }
 
-        // Parse and store user data
+        // Hydrate from session only as a temporary shell value.
         if (userStr) {
           try {
             const parsedUser = JSON.parse(userStr);
             setUserData(parsedUser);
-            
-            // ✅ Check if trials are already exhausted
-            if (parsedUser.trialCount === 0 && !parsedUser.isPremium) {
-              console.log("[ToolsContent] User has exhausted trials and no premium");
-              setTrialsExhausted(true);
-            } else {
-              setTrialsExhausted(false);
-            }
           } catch (e) {
             console.error("[ToolsContent] Failed to parse user data:", e);
           }
         }
 
-        // Token exists and is valid
-        console.log("[ToolsContent] Session valid");
+        // Token exists, but live backend validation is the only source of truth
+        const isEligible = await validateTokenAndCheckEligibility("c", () => {});
         setIsAuthenticated(true);
+        console.log("[ToolsContent] Session validated against backend");
+
+        if (!isEligible) {
+          console.log("[ToolsContent] Setting trialsExhausted to true");
+          setTrialsExhausted(true);
+        } else {
+          console.log("[ToolsContent] User is eligible, clearing exhausted state");
+          setTrialsExhausted(false);
+          setShowNoTrialsModal(false);
+        }
       } catch (error) {
         console.error("[ToolsContent] Auth check error:", error);
         setIsAuthenticated(false);
@@ -1307,18 +1370,28 @@ export default function ToolsContent() {
   const loadSamplesForTool = async () => {
     setTerminalOutputs((prev) => ({ ...prev, [currentTab]: "" }));
 
-    // Validate trial/premium eligibility before loading samples
-    const isEligible = await validateTokenAndCheckEligibility(currentTab, (msg: string) => mockAppendOutput(currentTab, msg));
+    // ✅ CRITICAL: Validate trial/premium eligibility BEFORE ANY other operation
+    console.log("[SAMPLES] Validating eligibility before loading samples...");
+    const isEligible = await validateTokenAndCheckEligibility(currentTab, (msg: string) => {
+      console.log("[SAMPLES] Eligibility check error message:", msg);
+      mockAppendOutput(currentTab, msg);
+    });
+    
     if (!isEligible) {
-      return;
+      console.log("[SAMPLES] User not eligible - aborting sample load");
+      console.log("[SAMPLES] trialsExhausted state should be true, showNoTrialsModal should be true");
+      return;  // ← Exit here, don't proceed to Docker setup
     }
+
+    console.log("[SAMPLES] User is eligible, proceeding with sample load");
 
     if (!currentTool) {
       mockAppendOutput(currentTab, `❌ Select a ${currentTab.toUpperCase()} tool first.`);
       return;
     }
 
-    // Check and pull Docker image if needed
+    // ✅ Only setup Docker if user IS eligible
+    console.log("[SAMPLES] Ensuring Docker image exists for eligible user...");
     const imageReady = await ensureDockerImageExists();
     if (!imageReady) {
       mockAppendOutput(currentTab, `❌ Failed to prepare tools. Please try again.`);
@@ -1666,19 +1739,8 @@ export default function ToolsContent() {
           mockAppendOutput(type, "✅ Execution completed.");
         }
         
-        // Deduct one trial after successful execution if user is not premium
-        const userData = sessionStorage.getItem("trustinn_user");
-        if (userData) {
-          try {
-            const user = JSON.parse(userData);
-            if (!user.isPremium) {
-              console.log("[EXEC] Deducting trial after successful execution");
-              await deductTrialAndCheckStatus();
-            }
-          } catch (error) {
-            console.warn("[EXEC] Failed to parse user data for trial deduction:", error);
-          }
-        }
+        // Trial consumption must be decided by backend, never by sessionStorage.
+        await deductTrialAndCheckStatus();
       } else if (!result.ok) {
         // No output and not ok - actual failure
         mockAppendOutput(type, `❌ Failed${result.error ? `: ${result.error}` : ""}`);
@@ -1834,19 +1896,8 @@ export default function ToolsContent() {
         mockAppendOutput(type, "✅ Execution completed.");
       }
       
-      // Deduct one trial after successful execution if user is not premium
-      const userData = sessionStorage.getItem("trustinn_user");
-      if (userData) {
-        try {
-          const user = JSON.parse(userData);
-          if (!user.isPremium) {
-            console.log("[COMPILE] Deducting trial after successful execution");
-            await deductTrialAndCheckStatus();
-          }
-        } catch (error) {
-          console.warn("[COMPILE] Failed to parse user data for trial deduction:", error);
-        }
-      }
+      // Trial consumption must be decided by backend, never by sessionStorage.
+      await deductTrialAndCheckStatus();
     } else if (!result.ok) {
       // No output and not ok - actual failure
       mockAppendOutput(type, `❌ ${result.error || "Unknown error"}`);
@@ -2114,23 +2165,20 @@ export default function ToolsContent() {
             }}>
               {imageSetupStatus}
             </p>
-            
+
             {imageSetupLoading && (
               <div style={{ margin: "24px 0" }}>
-                {/* Progress bar percentage */}
                 <div style={{
                   fontSize: 24, fontWeight: 700, color: "#6366f1",
                   marginBottom: 12
                 }}>
                   {imageSetupProgress}%
                 </div>
-                
-                {/* Progress bar background */}
+
                 <div style={{
                   width: "100%", height: 8, background: "#e2e8f0",
                   borderRadius: 999, overflow: "hidden", marginBottom: 4
                 }}>
-                  {/* Progress bar fill */}
                   <div style={{
                     height: "100%", background: "linear-gradient(90deg, #6366f1, #8b5cf6)",
                     width: `${imageSetupProgress}%`,
@@ -2138,16 +2186,34 @@ export default function ToolsContent() {
                     borderRadius: 999
                   }} />
                 </div>
-                
-                {/* Progress text */}
+
                 <div style={{
                   fontSize: 12, color: "#94a3b8",
                   marginTop: 8
                 }}>
-                  {imageSetupProgress < 100 
+                  {imageSetupProgress < 100
                     ? `Downloading... ${imageSetupProgress}% complete`
                     : "Installation complete!"}
                 </div>
+
+                <button
+                  onClick={() => void stopImageSetup()}
+                  disabled={isStoppingSetup}
+                  style={{
+                    marginTop: 14,
+                    padding: "8px 14px",
+                    borderRadius: 8,
+                    border: "1px solid #cbd5e1",
+                    background: "#f8fafc",
+                    color: "#334155",
+                    fontSize: 12,
+                    fontWeight: 600,
+                    cursor: isStoppingSetup ? "not-allowed" : "pointer",
+                    opacity: isStoppingSetup ? 0.7 : 1,
+                  }}
+                >
+                  {isStoppingSetup ? "Stopping..." : "Stop Setup"}
+                </button>
               </div>
             )}
           </div>

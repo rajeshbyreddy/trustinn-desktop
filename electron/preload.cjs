@@ -40,6 +40,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   removeDockerImage: (imageName) => ipcRenderer.invoke("tools:remove-docker-image", imageName),
   checkDockerImageExists: (imageName) => ipcRenderer.invoke("docker:check-image-exists", imageName),
   pullDockerImage: (imageName) => ipcRenderer.invoke("docker:pull-image", imageName),
+  stopDockerPullImage: () => ipcRenderer.invoke("docker:stop-pull-image"),
   
   // Setup event listeners
   onSetupPullingImage: (callback) => ipcRenderer.on("setup:pulling-image", callback),
