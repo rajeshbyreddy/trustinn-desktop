@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
-import { SetupModal } from "@/components/SetupModal";
 import { UpdateNotification } from "@/components/UpdateNotification";
 import "./globals.css";
 
@@ -33,7 +32,6 @@ export default function RootLayout({
     >
       <body className="min-h-full flex flex-col">
         {children}
-        <SetupModal />
         <UpdateNotification />
       </body>
     </html>
