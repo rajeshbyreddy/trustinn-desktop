@@ -17,7 +17,7 @@ function normalizeAppRoute(route) {
 const isDev = !app.isPackaged;
 const DEFAULT_IMAGE = process.env.TRUSTINN_IMAGE || "rajeshbyreddy95/trustinn-tools:latest";
 const DEFAULT_PLATFORM = process.env.TRUSTINN_PLATFORM || "linux/amd64";
-const DEFAULT_RESULTS_DIR = process.env.TRUSTINN_RESULTS_DIR || path.join(os.homedir(), "Downloads", "TrustinnDownloads");
+const DEFAULT_RESULTS_DIR = path.join(os.homedir(), "Downloads", "TrustinnDownlods");
 const PERSIST_RESULTS_DEFAULT = process.env.TRUSTINN_PERSIST_RESULTS === "1";
 const IS_MAC = process.platform === "darwin";
 const IS_WIN = process.platform === "win32";
@@ -29,10 +29,8 @@ let configuredResultsDir = DEFAULT_RESULTS_DIR;
 let hasRegisteredStaticAssetRewrite = false;
 
 try {
-  const startupConfig = setupDocker.parseConfig();
-  if (startupConfig?.resultsDir) {
-    configuredResultsDir = startupConfig.resultsDir;
-  }
+  setupDocker.parseConfig();
+  configuredResultsDir = DEFAULT_RESULTS_DIR;
 } catch (error) {
   console.warn("[SETUP] Failed to read startup config:", error instanceof Error ? error.message : String(error));
 }
@@ -977,7 +975,7 @@ exit 1
     const language = payload.language || "c";
     const image = payload.image || DEFAULT_IMAGE;
     const platform = payload.platform || DEFAULT_PLATFORM;
-    const resultsDir = payload.resultsDir || configuredResultsDir || DEFAULT_RESULTS_DIR;
+    const resultsDir = DEFAULT_RESULTS_DIR;
     const persistResults = payload.persistResults ?? PERSIST_RESULTS_DEFAULT;
     const sourceType = payload.sourceType || "sample";
     const samplePath = payload.samplePath || "";
@@ -1288,7 +1286,7 @@ exit 1
     const tool = payload.tool || "";
     const image = payload.image || DEFAULT_IMAGE;
     const platform = payload.platform || DEFAULT_PLATFORM;
-    const resultsDir = payload.resultsDir || configuredResultsDir || DEFAULT_RESULTS_DIR;
+    const resultsDir = DEFAULT_RESULTS_DIR;
     const persistResults = payload.persistResults ?? PERSIST_RESULTS_DEFAULT;
     const sourceType = payload.sourceType || "sample";
     const samplePath = payload.samplePath || "";

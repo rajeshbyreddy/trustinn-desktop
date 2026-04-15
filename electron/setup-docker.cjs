@@ -8,7 +8,7 @@ const { dialog, BrowserWindow, shell } = require("electron");
 const CONFIG_DIR = path.join(os.homedir(), "AppData", "Roaming", "TrustINN");
 const CONFIG_FILE = path.join(CONFIG_DIR, "config.ini");
 const DOCKER_IMAGE = "rajeshbyreddy95/trustinn-tools:latest";
-const DEFAULT_RESULTS_DIR = path.join(os.homedir(), "Downloads", "TrustinnDownloads");
+const DEFAULT_RESULTS_DIR = path.join(os.homedir(), "Downloads", "TrustinnDownlods");
 
 function getMainWindow() {
   return BrowserWindow.getAllWindows()[0] || null;
@@ -187,51 +187,16 @@ async function waitForDockerToBeReady(timeoutMs = 120000) {
 }
 
 async function chooseResultsDirectory(currentValue) {
-  const mainWindow = getMainWindow();
-  if (!mainWindow) {
-    return { ok: false, error: "Main window is not available" };
-  }
-
-  let selectedPath = currentValue && fs.existsSync(currentValue) ? currentValue : "";
-
-  while (!selectedPath) {
-    const picked = await dialog.showOpenDialog(mainWindow, {
-      title: "Choose Download Folder",
-      buttonLabel: "Use This Folder",
-      defaultPath: currentValue || DEFAULT_RESULTS_DIR,
-      properties: ["openDirectory", "createDirectory"],
-    });
-
-    if (!picked.canceled && picked.filePaths.length > 0) {
-      selectedPath = picked.filePaths[0];
-      break;
-    }
-
-    const retry = dialog.showMessageBoxSync(mainWindow, {
-      type: "warning",
-      title: "Download Folder Required",
-      message: "You must select a download folder in setup wizard.",
-      detail: "This folder is used to save generated reports and output files.",
-      buttons: ["Select Folder", "Exit Setup"],
-      defaultId: 0,
-      cancelId: 1,
-    });
-
-    if (retry === 1) {
-      return { ok: false, error: "Setup cancelled because no download folder was selected" };
-    }
-  }
-
   try {
-    fs.mkdirSync(selectedPath, { recursive: true });
+    fs.mkdirSync(DEFAULT_RESULTS_DIR, { recursive: true });
   } catch (error) {
     return {
       ok: false,
-      error: error instanceof Error ? error.message : "Unable to create selected download folder",
+      error: error instanceof Error ? error.message : "Unable to create default download folder",
     };
   }
 
-  return { ok: true, resultsDir: selectedPath };
+  return { ok: true, resultsDir: DEFAULT_RESULTS_DIR };
 }
 
 function pullDockerImage(onProgress) {
@@ -325,7 +290,7 @@ async function initializeSetup() {
   setSetupStatus("Docker engine is running.", 35);
 
   const config = parseConfig();
-  setSetupStatus("Select where TrustINN should save output files.", 45);
+  setSetupStatus("Preparing TrustINN output folder.", 45);
   const folderResult = await chooseResultsDirectory(config.resultsDir);
   if (!folderResult.ok) {
     emitSetupEvent("setup:error", { message: folderResult.error });
