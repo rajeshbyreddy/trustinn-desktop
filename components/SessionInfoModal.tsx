@@ -66,8 +66,8 @@ export function SessionCheckModal({ isOpen, user, onClose }: SessionCheckModalPr
 
   if (!isOpen) return null;
 
-  const displayName = userData?.name || user?.name || 'User';
-  const displayEmail = userData?.email || user?.email || 'Not available';
+  const displayName = String(userData?.name || user?.name || 'User');
+  const displayEmail = String(userData?.email || user?.email || 'Not available');
   const isPremium = userData?.isPremium || user?.isPremium || false;
   const trialCount = userData?.trialCount ?? user?.trialCount ?? 0;
 

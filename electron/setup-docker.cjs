@@ -236,7 +236,16 @@ async function chooseResultsDirectory(currentValue) {
 
 function pullDockerImage(onProgress) {
   return new Promise((resolve, reject) => {
-    const proc = spawn("docker", ["pull", DOCKER_IMAGE], {
+    // TODO: TEMPORARY WORKAROUND - Remove after Docker image supports ARM64
+    // On macOS with Apple Silicon (ARM64), use platform override to pull x86_64 version
+    const isAppleSilicon = process.arch === "arm64" && process.platform === "darwin";
+    const pullArgs = isAppleSilicon ? ["pull", "--platform", "linux/amd64", DOCKER_IMAGE] : ["pull", DOCKER_IMAGE];
+    
+    if (isAppleSilicon) {
+      console.log("[SETUP] Apple Silicon detected - pulling with platform override to linux/amd64");
+    }
+    
+    const proc = spawn("docker", pullArgs, {
       stdio: ["ignore", "pipe", "pipe"],
     });
 

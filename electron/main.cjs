@@ -1443,30 +1443,125 @@ exit 1
     }
   });
 
+  // Helper function to pull Docker image with retry logic
+  function pullDockerImageWithRetry(imageName, maxRetries = 3) {
+    return new Promise((resolve) => {
+      let attempt = 0;
+
+      const attemptPull = () => {
+        attempt++;
+        console.log(`[IPC] Attempt ${attempt}/${maxRetries} to pull Docker image: ${imageName}`);
+
+        try {
+          const isDeveloping = isDev;
+          const isAppleSilicon = process.arch === "arm64" && process.platform === "darwin";
+          
+          let pullArgs = ["pull", imageName];
+          if (isAppleSilicon && isDeveloping) {
+            console.log(`[IPC] Apple Silicon detected - pulling with platform override to linux/amd64`);
+            pullArgs = ["pull", "--platform", "linux/amd64", imageName];
+          }
+
+          const proc = spawn("docker", pullArgs, {
+            stdio: ["ignore", "pipe", "pipe"],
+          });
+
+          let output = "";
+          const seen = new Set();
+
+          const parseLine = (line) => {
+            const trimmed = line.trim();
+            if (!trimmed) return;
+
+            output += `${trimmed}\n`;
+            if (trimmed.includes("Downloading") || trimmed.includes("Extracting") || trimmed.includes("Pull complete")) {
+              seen.add(trimmed.split(":")[0]);
+            }
+
+            const approxProgress = Math.min(95, Math.max(10, seen.size * 4));
+            console.log(`[IPC] Docker pull progress: ${approxProgress}%`);
+            
+            // Send progress to renderer
+            if (mainWindow && mainWindow.webContents) {
+              mainWindow.webContents.send("setup:pull-progress", approxProgress);
+            }
+          };
+
+          proc.stdout.on("data", (chunk) => {
+            String(chunk).split(/\r?\n/).forEach(parseLine);
+          });
+
+          proc.stderr.on("data", (chunk) => {
+            String(chunk).split(/\r?\n/).forEach(parseLine);
+          });
+
+          proc.on("close", (code) => {
+            if (code === 0) {
+              console.log(`[IPC] Successfully pulled Docker image on attempt ${attempt}`);
+              
+              // Send final progress
+              if (mainWindow && mainWindow.webContents) {
+                mainWindow.webContents.send("setup:pull-progress", 100);
+              }
+              
+              return resolve({ ok: true, message: `Docker image pulled successfully` });
+            } else {
+              const errorMsg = output.trim() || "Failed to pull image";
+              console.error(`[IPC] Attempt ${attempt} failed: ${errorMsg}`);
+
+              // Retry if attempts remaining
+              if (attempt < maxRetries) {
+                console.log(`[IPC] Retrying in 2 seconds...`);
+                setTimeout(attemptPull, 2000);
+              } else {
+                console.error(`[IPC] All ${maxRetries} attempts failed`);
+                return resolve({ ok: false, error: `Failed after ${maxRetries} attempts: ${errorMsg}` });
+              }
+            }
+          });
+
+          proc.on("error", (error) => {
+            const errorMsg = error instanceof Error ? error.message : "Failed to pull Docker image";
+            console.error(`[IPC] Process error on attempt ${attempt}: ${errorMsg}`);
+
+            // Retry if attempts remaining
+            if (attempt < maxRetries) {
+              console.log(`[IPC] Retrying in 2 seconds...`);
+              setTimeout(attemptPull, 2000);
+            } else {
+              return resolve({ ok: false, error: `Failed after ${maxRetries} attempts: ${errorMsg}` });
+            }
+          });
+        } catch (error) {
+          const errorMsg = error instanceof Error ? error.message : "Unexpected error";
+          console.error(`[IPC] Exception on attempt ${attempt}: ${errorMsg}`);
+
+          // Retry if attempts remaining
+          if (attempt < maxRetries) {
+            console.log(`[IPC] Retrying in 2 seconds...`);
+            setTimeout(attemptPull, 2000);
+          } else {
+            return resolve({ ok: false, error: `Failed after ${maxRetries} attempts: ${errorMsg}` });
+          }
+        }
+      };
+
+      attemptPull();
+    });
+  }
+
   ipcMain.handle("docker:pull-image", async (_, imageName) => {
     try {
       if (!imageName || typeof imageName !== "string") {
         return { ok: false, error: "Invalid image name" };
       }
 
-      console.log(`[IPC] Pulling Docker image: ${imageName}`);
-
-      const result = await runProcess("docker", ["pull", imageName], { trackProcess: false });
-
-      if (result.code === 0) {
-        console.log(`[IPC] Successfully pulled Docker image: ${imageName}`);
-        return { ok: true, message: `Docker image pulled successfully` };
-      } else {
-        const errorMsg = result.stderr || result.stdout || "Failed to pull image";
-        console.error(`[IPC] Failed to pull Docker image: ${errorMsg}`);
-        return { ok: false, error: errorMsg };
-      }
+      console.log(`[IPC] Pulling Docker image with retry logic: ${imageName}`);
+      return await pullDockerImageWithRetry(imageName, 3);
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : "Failed to pull Docker image";
-      console.error(`[IPC] Error pulling Docker image: ${errorMsg}`);
+      console.error(`[IPC] Unexpected error: ${errorMsg}`);
       return { ok: false, error: errorMsg };
-    }
-  });
 
   // Setup auto-updater
   setupAutoUpdater();

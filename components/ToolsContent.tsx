@@ -834,11 +834,14 @@ export default function ToolsContent() {
   const [userData, setUserData] = useState<any>(null);
   const [showSessionModal, setShowSessionModal] = useState(false);
   const [trialsExhausted, setTrialsExhausted] = useState(false);
+  const [showNoTrialsModal, setShowNoTrialsModal] = useState(false);
+  const [isRefreshingTrial, setIsRefreshingTrial] = useState(false);
   
   // Docker image setup state
   const [showImageSetupModal, setShowImageSetupModal] = useState(false);
   const [imageSetupLoading, setImageSetupLoading] = useState(false);
   const [imageSetupStatus, setImageSetupStatus] = useState("Checking tool configuration...");
+  const [imageSetupProgress, setImageSetupProgress] = useState(0);
   const DOCKER_IMAGE_NAME = "rajeshbyreddy95/trustinn-tools:latest";
   
   
@@ -851,11 +854,18 @@ export default function ToolsContent() {
         return false;
       }
 
-      const response = await fetch("https://api.nitminer.com/api/auth/validate-token", {
+      // ✅ Add cache-busting parameters and headers to force fresh data from backend
+      const timestamp = Date.now();
+      console.log(`[EXEC] Fetching fresh token validation (timestamp: ${timestamp})...`);
+
+      const response = await fetch(`https://api.nitminer.com/api/auth/validate-token?t=${timestamp}`, {
         method: "GET",
         headers: {
           "Authorization": `Bearer ${token}`,
           "Content-Type": "application/json",
+          "Cache-Control": "no-cache, no-store, must-revalidate",
+          "Pragma": "no-cache",
+          "Expires": "0",
         },
       });
 
@@ -885,7 +895,7 @@ export default function ToolsContent() {
       if (trialCount === 0 && !isPremium) {
         console.log("[EXEC] User not eligible - no trials and not premium");
         setTrialsExhausted(true);  // ← Update UI immediately
-        onError("❌ You don't have any trials remaining. Please upgrade to premium to continue.");
+        setShowNoTrialsModal(true);  // ← Show modal card
         
         // Remove Docker image immediately if user has exhausted trials
         try {
@@ -918,11 +928,36 @@ export default function ToolsContent() {
     }
   };
 
+  // Refresh trial status manually
+  const refreshTrialStatus = async () => {
+    if (isRefreshingTrial) return;
+    
+    setIsRefreshingTrial(true);
+    try {
+      const isEligible = await validateTokenAndCheckEligibility(currentTab, () => {});
+      if (isEligible) {
+        console.log("[REFRESH] ✅ Trial status refreshed - user is eligible");
+        mockAppendOutput(currentTab, "✅ Trial status refreshed successfully!");
+        setShowNoTrialsModal(false);
+        setTrialsExhausted(false);
+      } else {
+        console.log("[REFRESH] ⚠️ Trial status refreshed - user not eligible");
+        mockAppendOutput(currentTab, "⚠️ Your trial eligibility remains unavailable.");
+      }
+    } catch (error) {
+      console.error("[REFRESH] Error refreshing trial status:", error);
+      mockAppendOutput(currentTab, "❌ Failed to refresh trial status. Please try again.");
+    } finally {
+      setIsRefreshingTrial(false);
+    }
+  };
+
   // Check and pull Docker image if needed
   const ensureDockerImageExists = async (): Promise<boolean> => {
     try {
       setShowImageSetupModal(true);
       setImageSetupLoading(true);
+      setImageSetupProgress(0);
       setImageSetupStatus("Checking tool configuration...");
 
       // Check if image exists
@@ -937,6 +972,7 @@ export default function ToolsContent() {
 
       if (checkResult.exists) {
         console.log("[DOCKER] Image already exists");
+        setImageSetupProgress(100);
         setImageSetupStatus("Configuration ready!");
         setImageSetupLoading(false);
         setTimeout(() => setShowImageSetupModal(false), 800);
@@ -945,6 +981,7 @@ export default function ToolsContent() {
 
       // Image doesn't exist, pull it
       console.log("[DOCKER] Image not found, pulling...");
+      setImageSetupProgress(5);
       setImageSetupStatus("Downloading tool configuration...");
       
       const pullResult = await window.electronAPI?.pullDockerImage?.(DOCKER_IMAGE_NAME);
@@ -956,6 +993,7 @@ export default function ToolsContent() {
       }
 
       console.log("[DOCKER] Image pulled successfully");
+      setImageSetupProgress(100);
       setImageSetupStatus("Configuration ready!");
       setImageSetupLoading(false);
       setTimeout(() => setShowImageSetupModal(false), 800);
@@ -1009,7 +1047,8 @@ export default function ToolsContent() {
       // If trials reached 0 and user is not premium, remove Docker image
       if (trialCount === 0 && !isPremium) {
         console.log("[TRIAL] Trials exhausted and user not premium. Removing Docker image...");
-        setTrialsExhausted(true);  // ← Update UI immediately
+        setTrialsExhausted(true);  // ← Update UI banner
+        setShowNoTrialsModal(true);  // ← Show modal card
         try {
           const removeResult = await window.electronAPI?.removeDockerImage?.(DOCKER_IMAGE_NAME);
           if (removeResult?.ok) {
@@ -1157,6 +1196,14 @@ export default function ToolsContent() {
     };
 
     void checkAuth();
+  }, []);
+
+  // Setup progress listener
+  useEffect(() => {
+    window.electronAPI?.onSetupProgress?.((progress: number) => {
+      console.log(`[SETUP] Progress: ${progress}%`);
+      setImageSetupProgress(progress);
+    });
   }, []);
 
   // Live code output listener
@@ -2048,7 +2095,7 @@ export default function ToolsContent() {
           justifyContent: "center", zIndex: 10000, backdropFilter: "blur(4px)"
         }}>
           <div style={{
-            background: "white", borderRadius: 16, padding: 40, maxWidth: 400,
+            background: "white", borderRadius: 16, padding: 40, maxWidth: 420,
             textAlign: "center", boxShadow: "0 10px 40px rgba(0,0,0,0.2)"
           }}>
             <div style={{
@@ -2067,17 +2114,40 @@ export default function ToolsContent() {
             }}>
               {imageSetupStatus}
             </p>
+            
             {imageSetupLoading && (
-              <div style={{
-                display: "flex", justifyContent: "center", gap: 6, margin: "20px 0"
-              }}>
-                {[0, 1, 2].map((i) => (
-                  <div key={i} style={{
-                    width: 8, height: 8, borderRadius: "50%",
-                    background: "#6366f1", opacity: 0.4 + (i * 0.2),
-                    animation: `pulse 1.5s ease-in-out ${i * 0.2}s infinite`
+              <div style={{ margin: "24px 0" }}>
+                {/* Progress bar percentage */}
+                <div style={{
+                  fontSize: 24, fontWeight: 700, color: "#6366f1",
+                  marginBottom: 12
+                }}>
+                  {imageSetupProgress}%
+                </div>
+                
+                {/* Progress bar background */}
+                <div style={{
+                  width: "100%", height: 8, background: "#e2e8f0",
+                  borderRadius: 999, overflow: "hidden", marginBottom: 4
+                }}>
+                  {/* Progress bar fill */}
+                  <div style={{
+                    height: "100%", background: "linear-gradient(90deg, #6366f1, #8b5cf6)",
+                    width: `${imageSetupProgress}%`,
+                    transition: "width 0.3s ease",
+                    borderRadius: 999
                   }} />
-                ))}
+                </div>
+                
+                {/* Progress text */}
+                <div style={{
+                  fontSize: 12, color: "#94a3b8",
+                  marginTop: 8
+                }}>
+                  {imageSetupProgress < 100 
+                    ? `Downloading... ${imageSetupProgress}% complete`
+                    : "Installation complete!"}
+                </div>
               </div>
             )}
           </div>
@@ -2089,7 +2159,121 @@ export default function ToolsContent() {
           0%, 100% { opacity: 0.3; transform: scale(1); }
           50% { opacity: 1; transform: scale(1.1); }
         }
+        @keyframes spin {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
+        }
       `}</style>
+
+      {/* No Trials Modal */}
+      {showNoTrialsModal && (
+        <div style={{
+          position: "fixed", top: 0, left: 0, width: "100%", height: "100%",
+          background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center",
+          justifyContent: "center", zIndex: 10001, backdropFilter: "blur(4px)"
+        }}>
+          <div style={{
+            background: "#ffffff", borderRadius: 16, padding: 40, maxWidth: 420,
+            textAlign: "center", boxShadow: "0 20px 60px rgba(0,0,0,0.3)",
+            border: "1px solid #fee2e2"
+          }}>
+            <div style={{
+              width: 80, height: 80, background: "#fecaca", borderRadius: "50%",
+              margin: "0 auto 24px", display: "flex", alignItems: "center",
+              justifyContent: "center", fontSize: 40
+            }}>
+              🚫
+            </div>
+            <h2 style={{ margin: "0 0 12px", fontSize: 22, fontWeight: 700, color: "#dc2626" }}>
+              No Trials Remaining
+            </h2>
+            <p style={{
+              margin: "0 0 24px", fontSize: 15, color: "#64748b",
+              lineHeight: 1.6
+            }}>
+              You've used all your trial executions. <strong>Upgrade to Premium</strong> to unlock unlimited access to all tools.
+            </p>
+            
+            <div style={{
+              background: "#f8fafc", borderRadius: 12, padding: 16, marginBottom: 24,
+              border: "1px solid #e2e8f0", textAlign: "left"
+            }}>
+              <div style={{ fontSize: 13, color: "#475569", marginBottom: 12 }}>
+                <strong>Premium includes:</strong>
+              </div>
+              <ul style={{ margin: 0, paddingLeft: 20, fontSize: 13, color: "#64748b", lineHeight: 1.8 }}>
+                <li>Unlimited tool executions</li>
+                <li>Priority support</li>
+                <li>Advanced features</li>
+                <li>API access</li>
+              </ul>
+            </div>
+
+            <div style={{ display: "flex", gap: 12 }}>
+              <button
+                onClick={() => setShowNoTrialsModal(false)}
+                style={{
+                  flex: 1,
+                  padding: "10px 20px", background: "#f1f5f9",
+                  border: "1px solid #cbd5e1", borderRadius: 8, color: "#475569",
+                  fontSize: 14, fontWeight: 600,
+                  cursor: "pointer", transition: "all 0.2s",
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = "#e2e8f0")}
+                onMouseLeave={(e) => (e.currentTarget.style.background = "#f1f5f9")}
+              >
+                Later
+              </button>
+              <button
+                onClick={() => void navigateToRoute("/pricing")}
+                style={{
+                  flex: 1,
+                  padding: "10px 20px", background: "linear-gradient(135deg,#dc2626,#b91c1c)",
+                  border: "none", borderRadius: 8, color: "#fff",
+                  fontSize: 14, fontWeight: 600,
+                  cursor: "pointer", transition: "all 0.2s",
+                  boxShadow: "0 4px 12px rgba(220,38,38,0.3)"
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.boxShadow = "0 6px 16px rgba(220,38,38,0.4)")}
+                onMouseLeave={(e) => (e.currentTarget.style.boxShadow = "0 4px 12px rgba(220,38,38,0.3)")}
+              >
+                Upgrade Now
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Header with Refresh Button ── */}
+      <div style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        padding: "8px 12px", background: TOKEN.bg, borderRadius: 8,
+        border: `1px solid ${TOKEN.border}`, flexShrink: 0
+      }}>
+        <span style={{ fontSize: 13, fontWeight: 600, color: TOKEN.text }}>
+          Select Programming Language
+        </span>
+        <button
+          onClick={() => void refreshTrialStatus()}
+          disabled={isRefreshingTrial}
+          style={{
+            padding: "6px 12px", borderRadius: 6, border: `1px solid ${TOKEN.border}`,
+            background: TOKEN.bg, color: TOKEN.text, fontSize: 12, fontWeight: 600,
+            cursor: isRefreshingTrial ? "not-allowed" : "pointer",
+            display: "flex", alignItems: "center", gap: 6,
+            opacity: isRefreshingTrial ? 0.6 : 1,
+            transition: "all 0.2s",
+          }}
+          onMouseEnter={(e) => !isRefreshingTrial && (e.currentTarget.style.background = TOKEN.bgSurface)}
+          onMouseLeave={(e) => (e.currentTarget.style.background = TOKEN.bg)}
+          title="Refresh trial status from server"
+        >
+          <span style={{ display: "inline-block", animation: isRefreshingTrial ? "spin 1s linear infinite" : "none" }}>
+            🔄
+          </span>
+          {isRefreshingTrial ? "Refreshing..." : "Refresh Status"}
+        </button>
+      </div>
 
       {/* ── Language Tabs — full width with icons ── */}
       <div

@@ -23,6 +23,10 @@ if (!cached) {
 }
 
 async function dbConnect() {
+  if (!cached) {
+    throw new Error('MongoDB cache not initialized');
+  }
+  
   if (cached.conn) {
     return cached.conn;
   }
