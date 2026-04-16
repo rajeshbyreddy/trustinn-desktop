@@ -324,9 +324,9 @@ export default function NoAccessError() {
       console.log('[LOGIN] User has no trials and not premium. Removing Docker images.');
       try {
         // Remove trustinn tools image
-        const removeResult1 = await window.electronAPI?.removeDockerImage?.('rajeshbyreddy95/trustinn-tools:latest');
+        const removeResult1 = await window.electronAPI?.removeDockerImage?.('rajeshbyreddy95/trustinn-tools:19.0.0');
         if (removeResult1?.ok) {
-          console.log('[LOGIN] Docker image rajeshbyreddy95/trustinn-tools:latest removed successfully');
+          console.log('[LOGIN] Docker image rajeshbyreddy95/trustinn-tools:19.0.0 removed successfully');
         } else {
           console.warn('[LOGIN] Failed to remove Docker image:', removeResult1?.error);
         }
@@ -434,9 +434,9 @@ export default function NoAccessError() {
           console.log('[LOGIN] User has no trials and not premium. Removing Docker images.');
           try {
             // Remove trustinn tools image
-            const removeResult1 = await window.electronAPI?.removeDockerImage?.('rajeshbyreddy95/trustinn-tools:latest');
+            const removeResult1 = await window.electronAPI?.removeDockerImage?.('rajeshbyreddy95/trustinn-tools:19.0.0');
             if (removeResult1?.ok) {
-              console.log('[LOGIN] Docker image rajeshbyreddy95/trustinn-tools:latest removed successfully');
+              console.log('[LOGIN] Docker image rajeshbyreddy95/trustinn-tools:19.0.0 removed successfully');
             } else {
               console.warn('[LOGIN] Failed to remove Docker image:', removeResult1?.error);
             }

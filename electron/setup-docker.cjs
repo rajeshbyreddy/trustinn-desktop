@@ -7,7 +7,7 @@ const { dialog, BrowserWindow, shell } = require("electron");
 
 const CONFIG_DIR = path.join(os.homedir(), "AppData", "Roaming", "TrustINN");
 const CONFIG_FILE = path.join(CONFIG_DIR, "config.ini");
-const DOCKER_IMAGE = "rajeshbyreddy95/trustinn-tools:latest";
+const DOCKER_IMAGE = "rajeshbyreddy95/trustinn-tools:19.0.0";
 const DEFAULT_RESULTS_DIR = path.join(os.homedir(), "Downloads", "TrustinnDownlods");
 
 function getMainWindow() {

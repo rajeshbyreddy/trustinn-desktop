@@ -379,12 +379,14 @@ function pythonFuzzToChartData(metrics: PythonFuzzMetrics): ChartDatum[] {
 }
 
 function parseVeriSolMetrics(output: string): VeriSolMetrics | null {
-  const inserted = output.match(/Properties inserted\s*:\s*(\d+)/i)?.[1];
-  const dynamicViolations = output.match(/Properties violation detected \(dynamic\)\s*:\s*(\d+)/i)?.[1];
-  const uniqueViolations = output.match(/Properties violation detected \(unique\)\s*:\s*(\d+)/i)?.[1];
-  const atomicConditions = output.match(/Total atomic condition\s*:\s*(\d+)/i)?.[1];
-  const coverage = output.match(/Condition Coverage %\s*:\s*(\d+(?:\.\d+)?)%/i)?.[1];
-  const runtimeSeconds = output.match(/Total runtime in seconds\s*:\s*(\d+(?:\.\d+)?)/i)?.[1];
+  // Parse the final project summary from VeriSol output
+  // Looks for patterns like "Akashic Project total Properties violation detected (dynamic): 22"
+  const inserted = output.match(/\btotal\s+assert\s+count:\s*(\d+)/i)?.[1] || output.match(/Properties inserted\s*:\s*(\d+)/i)?.[1];
+  const dynamicViolations = output.match(/total\s+properties?\s+violation\s+detected\s*\(\s*dynamic\s*\)\s*:\s*(\d+)/i)?.[1] || output.match(/Properties violation detected \(dynamic\)\s*:\s*(\d+)/i)?.[1];
+  const uniqueViolations = output.match(/total\s+(?:violation|properties?)\s+detected\s*\(\s*unique\s*\)\s*:\s*(\d+)/i)?.[1] || output.match(/Properties violation detected \(unique\)\s*:\s*(\d+)/i)?.[1];
+  const atomicConditions = output.match(/total\s+atomic\s+condition\s*:\s*(\d+)/i)?.[1] || output.match(/Total atomic condition\s*:\s*(\d+)/i)?.[1];
+  const coverage = output.match(/total\s+Condition\s+Coverage\s*%\s*:\s*(\d+(?:\.\d+)?)/i)?.[1] || output.match(/Condition Coverage %\s*:\s*(\d+(?:\.\d+)?)%/i)?.[1];
+  const runtimeSeconds = output.match(/total\s+runtime\s+in\s+seconds\s*:\s*(\d+(?:\.\d+)?)/i)?.[1] || output.match(/Total runtime in seconds\s*:\s*(\d+(?:\.\d+)?)/i)?.[1];
 
   if (!inserted && !dynamicViolations && !uniqueViolations && !atomicConditions && !coverage && !runtimeSeconds) {
     return null;
@@ -990,7 +992,7 @@ export default function ToolsContent() {
   const [imageSetupStatus, setImageSetupStatus] = useState("Checking tool configuration...");
   const [imageSetupProgress, setImageSetupProgress] = useState(0);
   const [isStoppingSetup, setIsStoppingSetup] = useState(false);
-  const DOCKER_IMAGE_NAME = "rajeshbyreddy95/trustinn-tools:latest";
+  const DOCKER_IMAGE_NAME = "rajeshbyreddy95/trustinn-tools:19.0.0";
   
   
   // Validate token and check trial/premium eligibility (REAL-TIME from backend)
@@ -1859,6 +1861,10 @@ export default function ToolsContent() {
       // Even for compact tools, show that we're starting
       mockAppendOutput(type, `[EXEC] Analyzing ${type.toUpperCase()} code...`);
     }
+    
+    // Notify user that we're checking Docker image availability
+    mockAppendOutput(type, `[DOCKER] Checking Docker image availability...`);
+    
     if (!window.electronAPI?.runTool) {
       mockAppendOutput(type, "❌ Tool execution unavailable. Electron IPC bridge not found.");
       setLoading(false);
@@ -2056,6 +2062,11 @@ export default function ToolsContent() {
           mockAppendOutput(type, "✅ Execution completed.");
         }
         
+        // Show where results are saved
+        if (result.resultsDir) {
+          mockAppendOutput(type, `📁 Results saved to: ${result.resultsDir}`);
+        }
+        
         // Only deduct trial if execution happened (not if compilation failed)
         if (result.trialDeducted !== false) {
           await deductTrialAndCheckStatus();
@@ -2184,6 +2195,9 @@ export default function ToolsContent() {
     const params = type === "c" ? cParams : type === "solidity" ? solidityParams : "{}";
 
     mockAppendOutput(type, `[Compilation] Compiling and executing ${type.toUpperCase()} code...`);
+    
+    // Notify user that we're checking Docker image availability
+    mockAppendOutput(type, `[DOCKER] Checking Docker image availability...`);
 
     if (!window.electronAPI?.runTool) {
       mockAppendOutput(type, "❌ Tool execution unavailable. Electron IPC bridge not found.");

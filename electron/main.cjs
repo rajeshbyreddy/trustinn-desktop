@@ -15,9 +15,9 @@ function normalizeAppRoute(route) {
 }
 
 const isDev = !app.isPackaged;
-const DEFAULT_IMAGE = process.env.TRUSTINN_IMAGE || "rajeshbyreddy95/trustinn-tools:latest";
+const DEFAULT_IMAGE = process.env.TRUSTINN_IMAGE || "rajeshbyreddy95/trustinn-tools:19.0.0";
 const DEFAULT_PLATFORM = process.env.TRUSTINN_PLATFORM || "linux/amd64";
-const DEFAULT_RESULTS_DIR = path.join(os.homedir(), "Downloads", "TrustinnDownlods");
+const DEFAULT_RESULTS_DIR = path.join(os.homedir(), "Downloads", "TrustinnDownloads");
 const PERSIST_RESULTS_DEFAULT = process.env.TRUSTINN_PERSIST_RESULTS === "1";
 const IS_MAC = process.platform === "darwin";
 const IS_WIN = process.platform === "win32";
@@ -1125,6 +1125,48 @@ exit 1
       return { ok: false, error: "Tool is required", output: "", command: "" };
     }
 
+    // ✅ CRITICAL: Check if Docker image exists before attempting to run tools
+    console.log(`[MAIN] Checking if Docker image exists: ${image}`);
+    try {
+      const imageCheckResult = await runProcess("docker", ["images", "--filter", `reference=${image}`, "--format", "{{.ID}}"], { trackProcess: false });
+      const imageExists = imageCheckResult.code === 0 && imageCheckResult.stdout && imageCheckResult.stdout.trim().length > 0;
+      
+      if (!imageExists) {
+        console.log(`[MAIN] Docker image not found: ${image}. Pulling image...`);
+        if (mainWindow && mainWindow.webContents) {
+          mainWindow.webContents.send("setup:pull-progress", 5);
+        }
+        
+        // Pull the image with retry logic
+        const pullResult = await pullDockerImageWithRetry(image, 3);
+        
+        if (!pullResult.ok) {
+          console.error(`[MAIN] Failed to pull Docker image: ${pullResult.error || "Unknown error"}`);
+          return {
+            ok: false,
+            error: `Docker image unavailable: ${pullResult.error || "Failed to pull image"}. Please ensure you have internet connection and try again.`,
+            output: "",
+            command: ""
+          };
+        }
+        
+        console.log(`[MAIN] Docker image pulled successfully: ${image}`);
+        if (mainWindow && mainWindow.webContents) {
+          mainWindow.webContents.send("setup:pull-progress", 100);
+        }
+      } else {
+        console.log(`[MAIN] Docker image found: ${image}`);
+      }
+    } catch (checkError) {
+      console.error(`[MAIN] Error checking Docker image availability:`, checkError);
+      return {
+        ok: false,
+        error: `Failed to verify Docker image: ${checkError instanceof Error ? checkError.message : "Unknown error"}`,
+        output: "",
+        command: ""
+      };
+    }
+
     fs.mkdirSync(resultsDir, { recursive: true });
 
     // Handle code execution/compilation
@@ -1250,13 +1292,9 @@ exit 1
       "-m", "4g",  // Allow up to 4GB memory
     ];
 
-    // Keep results ephemeral by default to avoid writing into user machine storage.
-    // Set TRUSTINN_PERSIST_RESULTS=1 or payload.persistResults=true to persist host-side reports.
-    if (persistResults) {
-      args.push("-v", `${getDockerVolumePath(resultsDir)}:/results`);
-    } else {
-      args.push("--tmpfs", "/results:rw,nosuid,nodev,size=1073741824");
-    }
+    // Always persist results to host so users can download analysis files
+    // Results are mounted to ~/Downloads/TrustinnDownloads
+    args.push("-v", `${getDockerVolumePath(resultsDir)}:/results`);
 
     if (sourceType === "file") {
       if (!filePath) {
@@ -1291,7 +1329,8 @@ exit 1
     // Add entrypoint and image
     args.push("--entrypoint", "python3", image, "/opt/trustinn/runner.py", "run-tool");
 
-    // For Solidity folders, run on each .sol file
+    // For Solidity folders, run VeriSol directly on the entire folder for proper project analysis
+    // This allows VeriSol to see all contracts together and generate proper coverage metrics
     if (language === "solidity" && sourceType === "folder") {
       try {
         const fs = require("fs");
@@ -1302,62 +1341,58 @@ exit 1
 
         console.log(`[MAIN] Found ${solFiles.length} Solidity files:`, solFiles);
 
-        // Run VeriSol on each .sol file and combine outputs
-        const allOutputs = [];
-        const allCommands = [];
-        let overallOk = true;
-
-        for (const solFile of solFiles) {
-          const fileSampleArg = `/input/project/${solFile}`;
-          const fileArgs = [
-            "run",
-            "--platform", platform,
-            "--rm",
-            "-m", "4g"
-          ];
-
-          // Add results volume if persisting
-          if (persistResults) {
-            fileArgs.push("-v", `${getDockerVolumePath(resultsDir)}:/results`);
-          } else {
-            fileArgs.push("--tmpfs", "/results:rw,nosuid,nodev,size=1073741824");
+        // Determine VeriSol mode from params (default: bmc)
+        let verisolMode = "bmc";
+        try {
+          const parsedParams = JSON.parse(params);
+          if (parsedParams.solidityMode) {
+            verisolMode = parsedParams.solidityMode;
           }
-
-          // Add input volume
-          fileArgs.push("-v", `${getDockerVolumePath(folderPath)}:/input/project:ro`);
-
-          // Add entrypoint and tool args
-          fileArgs.push(
-            "--entrypoint", "python3", image, "/opt/trustinn/runner.py", "run-tool",
-            "--language", "solidity",
-            "--tool", "VeriSol",
-            "--sample", fileSampleArg,
-            "--params", params
-          );
-
-          const fileCommand = `docker ${fileArgs.join(" ")}`;
-          allCommands.push(fileCommand);
-
-          console.log(`[MAIN] Running VeriSol on ${solFile}`);
-
-          const fileResult = await runProcess("docker", fileArgs, { trackProcess: true, commandTimeout: timeoutSeconds * 1000 });
-          
-          if (fileResult.code !== 0) {
-            overallOk = false;
-          }
-
-          const fileOutput = `${fileResult.stdout || ""}${fileResult.stderr || ""}`.trim();
-          allOutputs.push(`=== Processing ${solFile} ===\n${fileOutput}`);
+        } catch {
+          // Params not JSON, use default
         }
 
-        const combinedOutput = allOutputs.join("\n\n");
-        const combinedCommand = allCommands.join("; ");
+        // Call VeriSol directly on the entire folder
+        // VeriSol needs access to tools in /workspace/SOLIDITY, so mount user folder as a subdirectory
+        const dockerArgs = [
+          "run",
+          "--platform", platform,
+          "--rm",
+          "-m", "4g"
+        ];
+
+        // Always persist results for Solidity so users can download them
+        // Create the directory if it doesn't exist
+        fs.mkdirSync(resultsDir, { recursive: true });
+        dockerArgs.push("-v", `${getDockerVolumePath(resultsDir)}:/results`);
+
+        // Mount user's folder inside /workspace/SOLIDITY so VeriSol can find its tools (.assertinserter)
+        // This ensures VeriSol has everything it needs in the same directory tree
+        dockerArgs.push("-v", `${getDockerVolumePath(folderPath)}:/workspace/SOLIDITY/UserProject:ro`);
+
+        // Call VeriSol directly with bash
+        // IMPORTANT: Run from /workspace/SOLIDITY so VeriSol can find .assertinserter and other tools
+        // VeriSol creates Results folder, copy to /results which is mounted to host
+        dockerArgs.push(
+          "--entrypoint", "bash",
+          image,
+          "-c",
+          `cd /workspace/SOLIDITY && java -jar ./latest-java.jar ./UserProject ${verisolMode}; if [ -d ./Results ]; then cp -r ./Results/* /results/; fi`
+        );
+
+        const dockerCommand = `docker ${dockerArgs.join(" ")}`;
+        console.log(`[MAIN] Running VeriSol directly on folder with mode: ${verisolMode}`);
+        console.log(`[MAIN] Docker command: ${dockerCommand}`);
+
+        const result = await runProcess("docker", dockerArgs, { trackProcess: true, commandTimeout: timeoutSeconds * 1000 });
+        
+        const output = `${result.stdout || ""}${result.stderr || ""}`.trim();
 
         return {
-          ok: overallOk,
-          output: combinedOutput,
-          exitCode: overallOk ? 0 : 1,
-          command: combinedCommand,
+          ok: result.code === 0,
+          output: output,
+          exitCode: result.code || 1,
+          command: dockerCommand,
           resultsDir,
         };
 
@@ -1463,6 +1498,48 @@ exit 1
       return { ok: false, error: "Tool is required", output: "", command: "" };
     }
 
+    // ✅ CRITICAL: Check if Docker image exists before attempting to run tools
+    console.log(`[MAIN] Checking if Docker image exists: ${image}`);
+    try {
+      const imageCheckResult = await runProcess("docker", ["images", "--filter", `reference=${image}`, "--format", "{{.ID}}"], { trackProcess: false });
+      const imageExists = imageCheckResult.code === 0 && imageCheckResult.stdout && imageCheckResult.stdout.trim().length > 0;
+      
+      if (!imageExists) {
+        console.log(`[MAIN] Docker image not found: ${image}. Pulling image...`);
+        if (mainWindow && mainWindow.webContents) {
+          mainWindow.webContents.send("setup:pull-progress", 5);
+        }
+        
+        // Pull the image with retry logic
+        const pullResult = await pullDockerImageWithRetry(image, 3);
+        
+        if (!pullResult.ok) {
+          console.error(`[MAIN] Failed to pull Docker image: ${pullResult.error || "Unknown error"}`);
+          return {
+            ok: false,
+            error: `Docker image unavailable: ${pullResult.error || "Failed to pull image"}. Please ensure you have internet connection and try again.`,
+            output: "",
+            command: ""
+          };
+        }
+        
+        console.log(`[MAIN] Docker image pulled successfully: ${image}`);
+        if (mainWindow && mainWindow.webContents) {
+          mainWindow.webContents.send("setup:pull-progress", 100);
+        }
+      } else {
+        console.log(`[MAIN] Docker image found: ${image}`);
+      }
+    } catch (checkError) {
+      console.error(`[MAIN] Error checking Docker image availability:`, checkError);
+      return {
+        ok: false,
+        error: `Failed to verify Docker image: ${checkError instanceof Error ? checkError.message : "Unknown error"}`,
+        output: "",
+        command: ""
+      };
+    }
+
     fs.mkdirSync(resultsDir, { recursive: true });
 
     let sampleArg = samplePath;
@@ -1474,13 +1551,9 @@ exit 1
       "-m", "4g",  // Allow up to 4GB memory
     ];
 
-    // Keep results ephemeral by default to avoid writing into user machine storage.
-    // Set TRUSTINN_PERSIST_RESULTS=1 or payload.persistResults=true to persist host-side reports.
-    if (persistResults) {
-      args.push("-v", `${getDockerVolumePath(resultsDir)}:/results`);
-    } else {
-      args.push("--tmpfs", "/results:rw,nosuid,nodev,size=1073741824");
-    }
+    // Always persist results to host so users can download analysis files
+    // Results are mounted to ~/Downloads/TrustinnDownloads
+    args.push("-v", `${getDockerVolumePath(resultsDir)}:/results`);
 
     if (sourceType === "file") {
       if (!filePath) {
