@@ -177,11 +177,21 @@ function runProcess(command, args, options = {}) {
   const onData = options.onData; // callback for live output
 
   return new Promise((resolve, reject) => {
-    const proc = spawn(command, args, {
+    let resolved = false; // Prevent multiple resolutions
+    let killTimeout; // Store timeout ID to clear it
+    let lastDataTime = 0; // Throttle live output to prevent UI hangs
+    const spawnOptions = {
       stdio: ["ignore", "pipe", "pipe"],
       maxBuffer: 50 * 1024 * 1024, // 50MB buffer for large outputs
       timeout: commandTimeout, // Process timeout if specified
-    });
+    };
+
+    if (trackProcess && process.platform !== "win32") {
+      spawnOptions.detached = true;
+    }
+
+    const proc = spawn(command, args, spawnOptions);
+    console.log(`[DEBUG] Spawned process pid=${proc.pid}, trackProcess=${trackProcess}, detached=${spawnOptions.detached}, command=${command} ${args.join(" ")}`);
 
     if (trackProcess) {
       activeToolProcess = proc;
@@ -194,6 +204,24 @@ function runProcess(command, args, options = {}) {
     let stderrChunks = 0;
     let hasData = false;
 
+    const doResolve = (code, s, e) => {
+      if (resolved) return; // Prevent double resolution
+      resolved = true;
+      
+      // Clear the timeout if it exists
+      if (killTimeout) {
+        clearTimeout(killTimeout);
+        killTimeout = null;
+      }
+      
+      if (trackProcess && activeToolProcess === proc) {
+        activeToolProcess = null;
+      }
+      
+      console.log(`[DEBUG] Resolving with code ${code}`);
+      resolve({ code: code ?? 1, stdout: s, stderr: e });
+    };
+
     proc.stdout.on("data", (chunk) => {
       hasData = true;
       stdoutChunks++;
@@ -204,9 +232,11 @@ function runProcess(command, args, options = {}) {
         stdout += chunkStr.substring(0, MAX_OUTPUT_SIZE - stdout.length);
         stdout += '\n[Output truncated due to size limit]';
       }
-      // Send live output if callback provided
-      if (onData) {
+      // Send live output if callback provided, throttled to prevent UI hangs
+      const now = Date.now();
+      if (onData && now - lastDataTime > 50) { // Send at most every 50ms
         onData('stdout', chunkStr);
+        lastDataTime = now;
       }
       // Log first chunk for ACCP
       if (stdoutChunks === 1 && stdout.includes("NITMiner Technologies")) {
@@ -224,9 +254,11 @@ function runProcess(command, args, options = {}) {
         stderr += chunkStr.substring(0, MAX_OUTPUT_SIZE - stderr.length);
         stderr += '\n[Output truncated due to size limit]';
       }
-      // Send live output if callback provided
-      if (onData) {
+      // Send live output if callback provided, throttled to prevent UI hangs
+      const now = Date.now();
+      if (onData && now - lastDataTime > 50) { // Send at most every 50ms
         onData('stderr', chunkStr);
+        lastDataTime = now;
       }
     });
 
@@ -236,13 +268,20 @@ function runProcess(command, args, options = {}) {
 
     proc.on("error", (error) => {
       console.error("[DEBUG] Process error:", error.message);
-      reject(error);
+      
+      // Clear timeout on error
+      if (killTimeout) {
+        clearTimeout(killTimeout);
+        killTimeout = null;
+      }
+      
+      if (!resolved) {
+        resolved = true;
+        reject(error);
+      }
     });
 
     proc.on("close", (code) => {
-      if (trackProcess && activeToolProcess === proc) {
-        activeToolProcess = null;
-      }
       // Log for debugging ACCP issues
       if (stdout.includes("NITMiner Technologies")) {
         console.log(`[DEBUG] Process closed - code: ${code}, hasData: ${hasData}, stdout chunks: ${stdoutChunks}, length: ${stdout.length}, stderr chunks: ${stderrChunks}, length: ${stderr.length}`);
@@ -252,17 +291,47 @@ function runProcess(command, args, options = {}) {
         console.log(`[DEBUG] Last output line: ${lastLine?.substring(0, 100)}`);
         if (stderr) console.log(`[DEBUG] stderr: ${stderr.substring(0, 500)}`);
       }
-      resolve({ code: code ?? 1, stdout, stderr });
+      doResolve(code ?? 1, stdout, stderr);
     });
 
-    // Set a very long process timeout only if specified (for safety)
+    // Auto-kill process if timeout exceeded - more aggressive termination
     if (commandTimeout > 0) {
-      setTimeout(() => {
+      killTimeout = setTimeout(() => {
         if (proc && !proc.killed) {
-          console.log(`[DEBUG] Process timeout after ${commandTimeout}ms, killing process`);
-          proc.kill();
+          const pid = proc.pid;
+          console.log(`[DEBUG] Process timeout after ${commandTimeout}ms, killing PID ${pid} with SIGKILL`);
+          
+          try {
+            // First try SIGKILL on the process
+            proc.kill("SIGKILL");
+            
+            // Also kill any child processes (for compound commands)
+            if (process.platform === "darwin" || process.platform === "linux") {
+              try {
+                require("child_process").execSync(`kill -9 -${pid} 2>/dev/null || true`, { 
+                  stdio: "ignore",
+                  timeout: 1000 
+                });
+              } catch (e) {
+                // Ignore - process might already be dead
+              }
+            }
+            
+            // Force close IMMEDIATELY after 500ms if still not closed
+            setTimeout(() => {
+              if (!resolved) {
+                console.log(`[DEBUG] Force-resolving after kill timeout`);
+                doResolve(137, stdout, stderr); // 137 = killed by SIGKILL
+              }
+            }, 500);
+          } catch (err) {
+            console.error(`[DEBUG] Failed to kill process: ${err.message}`);
+            if (!resolved) {
+              doResolve(1, stdout, stderr);
+            }
+          }
         }
-      }, commandTimeout + 5000);
+      }, commandTimeout);
     }
   });
 }
@@ -710,27 +779,93 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle("tools:stop-run", async () => {
+    console.log("[STOP] Stop requested - activeToolProcess exists:", !!activeToolProcess);
+    
     if (!activeToolProcess) {
-      return { ok: true, stopped: false };
+      console.log("[STOP] No active process to stop");
+      return { ok: true, stopped: false, message: "No process running" };
     }
 
-    try {
-      activeToolProcess.kill("SIGTERM");
+    const procToKill = activeToolProcess;
+    const pid = procToKill.pid;
+    activeToolProcess = null;
 
-      setTimeout(() => {
-        if (activeToolProcess) {
-          activeToolProcess.kill("SIGKILL");
+    const isAlive = (checkPid) => {
+      try {
+        process.kill(checkPid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+
+    console.log(`[STOP] Attempting stop for PID ${pid}, detached=${procToKill.spawnargs ? true : false}`);
+    const sendSignal = (signal) => {
+      try {
+        if (process.platform === "darwin" || process.platform === "linux") {
+          process.kill(-pid, signal);
         }
-      }, 1200);
+      } catch (err) {
+        console.warn(`[STOP] Group ${signal} failed for PID ${pid}:`, err.message);
+      }
 
-      return { ok: true, stopped: true };
-    } catch (error) {
-      return {
-        ok: false,
-        stopped: false,
-        error: error instanceof Error ? error.message : "Failed to stop execution",
-      };
+      try {
+        procToKill.kill(signal);
+      } catch (err) {
+        console.warn(`[STOP] Proc ${signal} failed for PID ${pid}:`, err.message);
+      }
+    };
+
+    // First try SIGINT like Ctrl+C.
+    console.log(`[STOP] Sending SIGINT to process group PID ${pid}`);
+    sendSignal("SIGINT");
+
+    let stopped = false;
+    for (let i = 0; i < 10; i += 1) {
+      if (!isAlive(pid)) {
+        stopped = true;
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
     }
+
+    if (!stopped) {
+      console.log(`[STOP] SIGINT did not stop PID ${pid}, trying SIGTERM`);
+      sendSignal("SIGTERM");
+      for (let i = 0; i < 6; i += 1) {
+        if (!isAlive(pid)) {
+          stopped = true;
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+    }
+
+    if (!stopped) {
+      console.log(`[STOP] SIGTERM did not stop PID ${pid}, forcing SIGKILL`);
+      sendSignal("SIGKILL");
+    }
+
+    if (process.platform === "darwin" || process.platform === "linux") {
+      try {
+        require("child_process").execSync(`kill -9 -${pid} 2>/dev/null || true`, { stdio: "ignore", timeout: 1000 });
+        console.log(`[STOP] Additional group kill executed for PID ${pid}`);
+      } catch (err) {
+        console.warn(`[STOP] Additional group kill failed for PID ${pid}:`, err.message);
+      }
+    }
+
+    if (process.platform === "win32") {
+      try {
+        require("child_process").execSync(`taskkill /PID ${pid} /T /F 2>nul || true`, { stdio: "ignore", timeout: 1000, shell: true });
+        console.log(`[STOP] Used taskkill for PID ${pid}`);
+      } catch (err) {
+        console.warn(`[STOP] Failed to taskkill:`, err.message);
+      }
+    }
+
+    console.log(`[STOP] Stop handler completed for PID ${pid}, alive=${isAlive(pid)}`);
+    return { ok: true, stopped: true, message: "Process terminated" };
   });
 
   ipcMain.handle("update:quit-and-install", async () => {
@@ -1001,8 +1136,18 @@ exit 1
 
       const tempDir = path.join(os.tmpdir(), "trustinn-code");
       fs.mkdirSync(tempDir, { recursive: true });
-      const tempFileName = `code_${Date.now()}.${getFileExtension(language)}`;
-      const tempFilePath = path.join(tempDir, tempFileName);
+      
+      // For Java, extract the public class name FIRST to use as filename
+      let finalFileName = `code_${Date.now()}.${getFileExtension(language)}`;
+      let finalClassName = "Program";
+      
+      if (language === "java") {
+        const classMatch = codeContent.match(/public\s+class\s+(\w+)/);
+        finalClassName = classMatch ? classMatch[1] : "Program";
+        finalFileName = `${finalClassName}.java`;
+      }
+      
+      const tempFilePath = path.join(tempDir, finalFileName);
       fs.writeFileSync(tempFilePath, codeContent);
 
       if (payload.compile) {
@@ -1015,16 +1160,23 @@ exit 1
           if (language === "java") {
             compileCommand = "javac";
             compileArgs = [tempFilePath];
-            const compileResult = await runProcess(compileCommand, compileArgs, {});
+            // Compilation timeout is NOT tracked - only execution timeout matters
+            const compileResult = await runProcess(compileCommand, compileArgs, {
+              trackProcess: true,
+              commandTimeout: 30000,
+              onData: (stream, data) => {
+                if (mainWindow) {
+                  mainWindow.webContents.send('code-output-live', { language, stream, data });
+                }
+              }
+            });
             if (compileResult.code !== 0) {
               fs.unlinkSync(tempFilePath);
-              return { ok: false, output: compileResult.stderr, error: "Compilation failed", command: `${compileCommand} ${compileArgs.join(" ")}` };
+              // Compilation error - DO NOT deduct trial
+              return { ok: false, output: compileResult.stderr, error: "Compilation failed", command: `${compileCommand} ${compileArgs.join(" ")}`, trialDeducted: false };
             }
-            // Extract class name from code
-            const classMatch = codeContent.match(/public\s+class\s+(\w+)/);
-            const className = classMatch ? classMatch[1] : "Program";
             command = "java";
-            args = ["-cp", tempDir, className];
+            args = ["-cp", tempDir, finalClassName];
           } else if (language === "python") {
             command = "python3";
             args = [tempFilePath];
@@ -1032,10 +1184,19 @@ exit 1
             const exePath = tempFilePath.replace(/\.c$/, "");
             compileCommand = "gcc";
             compileArgs = [tempFilePath, "-o", exePath];
-            const compileResult = await runProcess(compileCommand, compileArgs, {});
+            const compileResult = await runProcess(compileCommand, compileArgs, {
+              trackProcess: true,
+              commandTimeout: 30000,
+              onData: (stream, data) => {
+                if (mainWindow) {
+                  mainWindow.webContents.send('code-output-live', { language, stream, data });
+                }
+              }
+            });
             if (compileResult.code !== 0) {
               fs.unlinkSync(tempFilePath);
-              return { ok: false, output: compileResult.stderr, error: "Compilation failed", command: `${compileCommand} ${compileArgs.join(" ")}` };
+              // Compilation error - DO NOT deduct trial
+              return { ok: false, output: compileResult.stderr, error: "Compilation failed", command: `${compileCommand} ${compileArgs.join(" ")}`, trialDeducted: false };
             }
             command = exePath;
             args = [];
@@ -1045,7 +1206,8 @@ exit 1
           }
 
           const result = await runProcess(command, args, { 
-            commandTimeout: 10000, // 10 second timeout to prevent infinite loops
+            trackProcess: true, // Track so Stop button can kill it
+            commandTimeout: 30000, // 30 second timeout to prevent infinite loops
             onData: (stream, data) => {
               if (mainWindow) {
                 mainWindow.webContents.send('code-output-live', { language, stream, data });
@@ -1056,18 +1218,20 @@ exit 1
           // Cleanup
           fs.unlinkSync(tempFilePath);
           if (language === "java") {
-            const classFile = path.join(tempDir, `${className}.class`);
+            const classFile = path.join(tempDir, `${finalClassName}.class`);
             if (fs.existsSync(classFile)) fs.unlinkSync(classFile);
           } else if (language === "c") {
             const exePath = tempFilePath.replace(/\.c$/, "");
             if (fs.existsSync(exePath)) fs.unlinkSync(exePath);
           }
 
-          return { ok: result.code === 0, output: "", error: result.stderr, command: `${command} ${args.join(" ")}` };
+          // Execution always deducts trial (success or failure)
+          return { ok: result.code === 0, output: "", error: result.stderr, command: `${command} ${args.join(" ")}`, trialDeducted: true };
         } catch (error) {
           // Cleanup on error
           if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
-          return { ok: false, error: "Execution failed", output: "" };
+          // If we reached here, compilation succeeded but execution failed - still deduct trial
+          return { ok: false, error: "Execution failed", output: "", trialDeducted: true };
         }
       } else {
         // Run analysis tool on the temp file

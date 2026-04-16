@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, lazy, useMemo, useRef, useState, useEffect } from "react";
+import { flushSync } from "react-dom";
 import type { CSSProperties } from "react";
 import {
   PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer,
@@ -408,23 +409,47 @@ function veriSolToChartData(metrics: VeriSolMetrics): ChartDatum[] {
   ];
 }
 
-/* ─── Design tokens ─────────────────────────────────────────── */
+/* ─── Modern Design Tokens with Gradients ─────────────────────────────────────────── */
 const TOKEN = {
+  // Backgrounds
   bg: "#ffffff",
-  bgSurface: "#f8fafc",
+  bgSurface: "linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)",
   bgDeep: "#f1f5f9",
+  bgGlass: "rgba(255, 255, 255, 0.7)",
+  
+  // Borders & Shadows
   border: "#e2e8f0",
   borderMd: "#cbd5e1",
-  text: "#2795F5",
-  textSub: "#64748b",
+  shadow: "0 1px 3px rgba(0,0,0,0.05), 0 1px 2px rgba(0,0,0,0.03)",
+  shadowMd: "0 4px 6px rgba(0,0,0,0.05), 0 2px 4px rgba(0,0,0,0.03)",
+  shadowLg: "0 10px 15px rgba(0,0,0,0.08), 0 4px 6px rgba(0,0,0,0.04)",
+  shadowXl: "0 20px 25px rgba(0,0,0,0.1), 0 10px 10px rgba(0,0,0,0.04)",
+  
+  // Text Colors
+  text: "#1e293b",
+  textSub: "#475569",
   textMuted: "#94a3b8",
+  
+  // Brand Colors with Gradients
   accent: "#6366f1",
+  accentGradient: "linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)",
   green: "#059669",
+  greenGradient: "linear-gradient(135deg, #10b981 0%, #059669 100%)",
   orange: "#ea580c",
+  orangeGradient: "linear-gradient(135deg, #f59e0b 0%, #ea580c 100%)",
   red: "#dc2626",
-  termBg: "#020617",
-  termSurface: "#0f172a",
-  termBorder: "#1e293b",
+  redGradient: "linear-gradient(135deg, #ef4444 0%, #dc2626 100%)",
+  blue: "#2563eb",
+  blueGradient: "linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)",
+  
+  // Terminal
+  termBg: "#0f172a",
+  termSurface: "#1e293b",
+  termBorder: "#334155",
+  termGlow: "0 0 20px rgba(99,102,241,0.15)",
+  
+  // Glassmorphism
+  glass: "backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);",
 } as const;
 
 /* ─── Language metadata with icons ──────────────────────────── */
@@ -439,70 +464,110 @@ const LANG_META: Record<Tab, {
   solidity: { label: "Solidity", Icon: SiSolidity, iconColor: "#8b5cf6" },
 };
 
-/* ─── Shared style helpers ───────────────────────────────────── */
+/* ─── Modern Style Helpers with Advanced Effects ───────────────────────────────────── */
 const S = {
   card: {
     background: TOKEN.bg,
     border: `1px solid ${TOKEN.border}`,
-    borderRadius: 12,
-    padding: "12px 14px",
+    borderRadius: 16,
+    padding: "16px 18px",
+    boxShadow: TOKEN.shadowMd,
+    transition: "all 0.3s ease",
   } as CSSProperties,
 
   label: {
     display: "block",
     fontSize: 11,
-    fontWeight: 600,
+    fontWeight: 700,
     color: TOKEN.textSub,
-    letterSpacing: "0.05em",
+    letterSpacing: "0.08em",
     textTransform: "uppercase" as const,
-    marginBottom: 6,
+    marginBottom: 8,
   } as CSSProperties,
 
   select: {
     width: "100%",
-    border: `1px solid ${TOKEN.borderMd}`,
-    borderRadius: 8,
-    padding: "7px 10px",
-    fontSize: 12,
+    border: `2px solid ${TOKEN.border}`,
+    borderRadius: 10,
+    padding: "10px 14px",
+    fontSize: 13,
+    fontWeight: 500,
     color: TOKEN.text,
     background: TOKEN.bg,
     outline: "none",
     cursor: "pointer",
+    transition: "all 0.2s ease",
+    boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
   } as CSSProperties,
 
   btn: (bg: string, color = "#fff"): CSSProperties => ({
-    background: bg, color,
-    border: "none", borderRadius: 8,
-    padding: "8px 0", fontSize: 11.5, fontWeight: 600,
-    cursor: "pointer", display: "inline-flex",
-    alignItems: "center", justifyContent: "center",
-    gap: 5, transition: "opacity 0.15s",
+    background: bg, 
+    color,
+    border: "none", 
+    borderRadius: 10,
+    padding: "10px 0", 
+    fontSize: 12.5, 
+    fontWeight: 700,
+    cursor: "pointer", 
+    display: "inline-flex",
+    alignItems: "center", 
+    justifyContent: "center",
+    gap: 6, 
+    transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)",
+    boxShadow: TOKEN.shadowMd,
+    position: "relative",
+    overflow: "hidden",
   }),
 
   outlineBtn: {
-    background: TOKEN.bg, color: TOKEN.text,
-    borderRadius: 8, border: `1px solid ${TOKEN.border}`,
-    padding: "8px 0", fontSize: 11.5, fontWeight: 500,
-    cursor: "pointer", display: "inline-flex",
-    alignItems: "center", justifyContent: "center", gap: 5,
+    background: TOKEN.bg, 
+    color: TOKEN.text,
+    borderRadius: 10, 
+    border: `2px solid ${TOKEN.border}`,
+    padding: "9px 0", 
+    fontSize: 12, 
+    fontWeight: 600,
+    cursor: "pointer", 
+    display: "inline-flex",
+    alignItems: "center", 
+    justifyContent: "center", 
+    gap: 6,
+    transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)",
+    boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
   } as CSSProperties,
 
   paramBox: {
-    background: "#eff6ff", border: "1px solid #bfdbfe",
-    borderRadius: 8, padding: "10px 12px", marginTop: 8,
+    background: "linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%)", 
+    border: "2px solid #bfdbfe",
+    borderRadius: 12, 
+    padding: "14px 16px", 
+    marginTop: 10,
+    boxShadow: "inset 0 1px 3px rgba(59,130,246,0.1)",
   } as CSSProperties,
 
   paramLabel: {
-    fontSize: 11, color: "#1d4ed8",
-    fontWeight: 600, display: "block", marginBottom: 5,
+    fontSize: 11.5, 
+    color: "#1e40af",
+    fontWeight: 700, 
+    display: "block", 
+    marginBottom: 6,
+    letterSpacing: "0.03em",
   } as CSSProperties,
 
   termBtn: {
-    background: "transparent", border: "none",
-    color: "#6b7280", fontSize: 11, cursor: "pointer",
-    display: "flex", alignItems: "center", gap: 4,
-    padding: "3px 7px", borderRadius: 5,
-    fontFamily: "inherit", transition: "color 0.12s",
+    background: "transparent", 
+    border: "none",
+    color: "#94a3b8", 
+    fontSize: 11.5, 
+    cursor: "pointer",
+    display: "flex", 
+    alignItems: "center", 
+    gap: 5,
+    padding: "5px 10px", 
+    borderRadius: 7,
+    fontFamily: "inherit", 
+    fontWeight: 600,
+    transition: "all 0.2s ease",
     whiteSpace: "nowrap" as const,
   } as CSSProperties,
 };
@@ -539,46 +604,54 @@ function AnalyticsDrawer({
         }}
       />
 
-      {/* Drawer panel — exactly 30% */}
+      {/* Drawer panel with glassmorphism — exactly 30% */}
       <div
         style={{
           position: "fixed", top: 0, right: 0, bottom: 0,
           width: "30%",
-          minWidth: 300,
-          maxWidth: 460,
+          minWidth: 320,
+          maxWidth: 480,
           zIndex: 51,
-          background: TOKEN.bg,
-          borderLeft: `1px solid ${TOKEN.border}`,
-          boxShadow: "-8px 0 40px rgba(0,0,0,0.12)",
+          background: "rgba(255, 255, 255, 0.95)",
+          backdropFilter: "blur(20px)",
+          WebkitBackdropFilter: "blur(20px)",
+          borderLeft: "1px solid rgba(226, 232, 240, 0.8)",
+          boxShadow: "-12px 0 48px rgba(99,102,241,0.12)",
           transform: open ? "translateX(0)" : "translateX(100%)",
-          transition: "transform 0.38s cubic-bezier(0.16,1,0.3,1)",
+          transition: "transform 0.4s cubic-bezier(0.16,1,0.3,1)",
           display: "flex", flexDirection: "column", overflow: "hidden",
         }}
       >
-        {/* Drawer header */}
+        {/* Modern drawer header with gradient icon */}
         <div
           style={{
-            padding: "13px 16px",
-            borderBottom: `1px solid ${TOKEN.border}`,
+            padding: "20px 24px",
+            borderBottom: "1px solid rgba(226, 232, 240, 0.6)",
             display: "flex", alignItems: "center", justifyContent: "space-between",
-            flexShrink: 0, background: TOKEN.bgSurface,
+            flexShrink: 0, 
+            background: "linear-gradient(135deg, rgba(248, 250, 252, 0.8) 0%, rgba(241, 245, 249, 0.8) 100%)",
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <div
               style={{
-                width: 30, height: 30, borderRadius: 8,
-                background: TOKEN.accent,
-                display: "flex", alignItems: "center", justifyContent: "center",
+                width: 42, 
+                height: 42, 
+                borderRadius: 12,
+                background: TOKEN.accentGradient,
+                display: "flex", 
+                alignItems: "center", 
+                justifyContent: "center",
+                boxShadow: "0 4px 12px rgba(99,102,241,0.25)",
               }}
             >
-              <FiBarChart2 size={15} color="#fff" />
+              <FiBarChart2 size={20} color="#fff" />
             </div>
             <div>
-              <div style={{ fontSize: 13, fontWeight: 700, color: TOKEN.text }}>
+              <div style={{ fontSize: 16, fontWeight: 700, color: TOKEN.text, letterSpacing: "-0.01em" }}>
                 {visualizationTitle || "Analytics"}
               </div>
-              <div style={{ fontSize: 10.5, color: TOKEN.textMuted, marginTop: 1 }}>
+              <div style={{ fontSize: 12, color: TOKEN.textMuted, marginTop: 2, fontWeight: 500 }}>
                 Execution visualization
               </div>
             </div>
@@ -586,13 +659,28 @@ function AnalyticsDrawer({
           <button
             onClick={onClose}
             style={{
-              width: 26, height: 26, borderRadius: 6,
-              background: TOKEN.bgDeep, border: `1px solid ${TOKEN.border}`,
-              color: TOKEN.textSub, cursor: "pointer",
-              display: "flex", alignItems: "center", justifyContent: "center",
+              width: 36, 
+              height: 36, 
+              borderRadius: 10,
+              background: "rgba(248, 250, 252, 0.5)", 
+              border: "1px solid rgba(226, 232, 240, 0.6)",
+              color: TOKEN.textSub, 
+              cursor: "pointer",
+              display: "flex", 
+              alignItems: "center", 
+              justifyContent: "center",
+              transition: "all 0.2s",
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = "rgba(239, 68, 68, 0.1)";
+              e.currentTarget.style.color = "#ef4444";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = "rgba(248, 250, 252, 0.5)";
+              e.currentTarget.style.color = TOKEN.textSub;
             }}
           >
-            <FiX size={14} />
+            <FiX size={18} />
           </button>
         </div>
 
@@ -767,59 +855,118 @@ function SamplePickerModal({ open, title, samples, onClose, onSelect }: {
     <div
       style={{
         position: "fixed", inset: 0, zIndex: 60,
-        background: "rgba(2,6,23,0.5)",
-        display: "flex", alignItems: "center", justifyContent: "center", padding: 16,
+        background: "rgba(15,23,42,0.6)",
+        backdropFilter: "blur(8px)",
+        WebkitBackdropFilter: "blur(8px)",
+        display: "flex", alignItems: "center", justifyContent: "center", padding: 20,
+        animation: "fadeIn 0.2s ease-out",
       }}
       onClick={onClose}
     >
       <div
         onClick={(e) => e.stopPropagation()}
         style={{
-          width: "min(600px, 95vw)", maxHeight: "76vh",
-          background: TOKEN.bg, borderRadius: 14,
-          border: `1px solid ${TOKEN.border}`,
-          boxShadow: "0 24px 60px rgba(15,23,42,0.2)",
+          width: "min(640px, 95vw)", maxHeight: "80vh",
+          background: "rgba(255, 255, 255, 0.98)",
+          backdropFilter: "blur(20px)",
+          WebkitBackdropFilter: "blur(20px)",
+          borderRadius: 20,
+          border: "1px solid rgba(226, 232, 240, 0.8)",
+          boxShadow: TOKEN.shadowXl,
           overflow: "hidden", display: "flex", flexDirection: "column",
+          animation: "fadeIn 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
         }}
       >
         <div
           style={{
-            padding: "12px 16px", borderBottom: `1px solid ${TOKEN.border}`,
-            fontSize: 13, fontWeight: 700, color: TOKEN.text,
-            display: "flex", justifyContent: "space-between", alignItems: "center",
+            padding: "18px 24px", 
+            borderBottom: "1px solid rgba(226, 232, 240, 0.6)",
+            background: "rgba(248, 250, 252, 0.8)",
+            fontSize: 16, 
+            fontWeight: 700, 
+            color: TOKEN.text,
+            display: "flex", 
+            justifyContent: "space-between", 
+            alignItems: "center",
           }}
         >
           {title}
           <button
             onClick={onClose}
             style={{
-              width: 27, height: 27, borderRadius: 6,
-              background: TOKEN.bgDeep, border: `1px solid ${TOKEN.border}`,
-              color: TOKEN.textSub, cursor: "pointer",
-              display: "flex", alignItems: "center", justifyContent: "center",
+              width: 32, 
+              height: 32, 
+              borderRadius: 8,
+              background: "rgba(248, 250, 252, 0.5)", 
+              border: "1px solid rgba(226, 232, 240, 0.6)",
+              color: TOKEN.textSub, 
+              cursor: "pointer",
+              display: "flex", 
+              alignItems: "center", 
+              justifyContent: "center",
+              transition: "all 0.2s",
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = "rgba(239, 68, 68, 0.1)";
+              e.currentTarget.style.color = "#ef4444";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = "rgba(248, 250, 252, 0.5)";
+              e.currentTarget.style.color = TOKEN.textSub;
             }}
           >
-            <FiX size={14} />
+            <FiX size={16} />
           </button>
         </div>
-        <div style={{ padding: 10, overflowY: "auto" }}>
+        <div style={{ padding: 16, overflowY: "auto", flex: 1 }}>
           {samples.length === 0 ? (
-            <div style={{ fontSize: 12, color: TOKEN.textMuted, padding: "8px 4px" }}>No samples available.</div>
+            <div style={{ 
+              fontSize: 13, 
+              color: TOKEN.textMuted, 
+              padding: "24px 16px", 
+              textAlign: "center",
+              background: "rgba(248, 250, 252, 0.5)",
+              borderRadius: 12,
+            }}>
+              No samples available yet.
+            </div>
           ) : (
-            samples.map((s) => (
-              <button
-                key={s.path}
-                onClick={() => onSelect(s)}
-                style={{
-                  width: "100%", textAlign: "left", marginBottom: 6,
-                  border: `1px solid ${TOKEN.border}`, borderRadius: 8,
-                  background: TOKEN.bgSurface, padding: "9px 12px",
-                  cursor: "pointer", fontSize: 12, color: TOKEN.text,
-                }}
-              >
-                {s.name}
-              </button>
-            ))
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {samples.map((s) => (
+                <button
+                  key={s.path}
+                  onClick={() => onSelect(s)}
+                  style={{
+                    width: "100%", 
+                    textAlign: "left",
+                    border: "1px solid rgba(226, 232, 240, 0.8)", 
+                    borderRadius: 12,
+                    background: "rgba(255, 255, 255, 0.7)", 
+                    padding: "14px 16px",
+                    cursor: "pointer", 
+                    fontSize: 13, 
+                    fontWeight: 600,
+                    color: TOKEN.text,
+                    transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)",
+                    boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = TOKEN.accentGradient;
+                    e.currentTarget.style.color = "#fff";
+                    e.currentTarget.style.transform = "translateY(-2px)";
+                    e.currentTarget.style.boxShadow = TOKEN.shadowMd;
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = "rgba(255, 255, 255, 0.7)";
+                    e.currentTarget.style.color = TOKEN.text;
+                    e.currentTarget.style.transform = "translateY(0)";
+                    e.currentTarget.style.boxShadow = "0 1px 3px rgba(0,0,0,0.05)";
+                  }}
+                >
+                  📄 {s.name}
+                </button>
+              ))}
+            </div>
           )}
         </div>
       </div>
@@ -1195,7 +1342,12 @@ export default function ToolsContent() {
   const [visualizationTitle, setVisualizationTitle] = useState("Execution Metrics");
   const [percentageItems, setPercentageItems] = useState<string[]>([]);
   const terminalRef = useRef<HTMLDivElement>(null);
-  const timerIdsRef = useRef<number[]>([]);
+  const timerIdsRef = useRef<(NodeJS.Timeout | ReturnType<typeof setTimeout>)[]>([]);
+  const stopRequestedRef = useRef<boolean>(false);
+  const pendingPromisesRef = useRef<Array<{
+    resolve: (v: any) => void;
+    reject: (e: any) => void;
+  }>>([]);
 
   const logoSrc = useMemo(() => {
     if (typeof window === "undefined") return "/logo.png";
@@ -1287,6 +1439,14 @@ export default function ToolsContent() {
     const handleLiveOutput = (payload: { language: string; stream: string; data: string }) => {
       const { language, data } = payload;
       const validTabs: Tab[] = ["c", "java", "python", "solidity"];
+      
+      // CRITICAL: Don't accept output if process was stopped by user
+      // This prevents infinite state updates that freeze the UI
+      if (stopRequestedRef.current) {
+        console.log("[OUTPUT] Ignoring output after stop requested");
+        return;
+      }
+      
       if (validTabs.includes(language as Tab)) {
         setTerminalOutputs((prev) => ({
           ...prev,
@@ -1312,6 +1472,13 @@ export default function ToolsContent() {
     return solidityTool;
   }, [currentTab, cTool, javaTool, pythonTool, solidityTool]);
 
+  // Auto-scroll terminal to bottom when output changes
+  useEffect(() => {
+    if (terminalRef.current) {
+      terminalRef.current.scrollTop = terminalRef.current.scrollHeight;
+    }
+  }, [terminalOutputs[currentTab]]);
+
   const cParams = useMemo(() => {
     switch (cTool) {
       case "Condition Satisfiability Analysis": return `{cbmcBound:${cbmcBound || "10"}}`;
@@ -1326,25 +1493,97 @@ export default function ToolsContent() {
 
   const mockAppendOutput = (tab: Tab, msg: string) => {
     setTerminalOutputs((prev) => ({ ...prev, [tab]: prev[tab] + msg + "\n" }));
-    setTimeout(() => {
-      if (terminalRef.current) terminalRef.current.scrollTop = terminalRef.current.scrollHeight;
-    }, 16);
+    // Auto-scroll is now handled by useEffect, no need for setTimeout
   };
 
-  const stopExecution = async (reason?: string) => {
-    timerIdsRef.current.forEach(clearTimeout);
+  const stopExecution = (reason?: string) => {
+    // Stop immediately - set states first, then clean up
+    const wasRunning = loading || isCompiling;
+    
+    console.log("[UI-STOP] Stop called - wasRunning:", wasRunning, "reason:", reason, "loading:", loading, "isCompiling:", isCompiling, "pendingCount:", pendingPromisesRef.current.length);
+    
+    // Set abort flag FIRST
+    stopRequestedRef.current = true;
+    
+    // Reject any pending promises from compilation/execution
+    pendingPromisesRef.current.forEach(({ reject }) => {
+      try {
+        reject(new Error("Stop requested by user"));
+      } catch (e) {
+        console.warn("[UI-STOP] reject failed:", e);
+      }
+    });
+    pendingPromisesRef.current = [];
+    
+    // Clear all pending timers - this is critical
+    timerIdsRef.current.forEach(id => {
+      try {
+        clearTimeout(id);
+      } catch (e) {
+        // Ignore cleanup errors
+      }
+    });
     timerIdsRef.current = [];
-    if (window.electronAPI?.stopRun) {
-      try { await window.electronAPI.stopRun(); } catch { /* ignore */ }
+    
+    // Use flushSync to ensure CRITICAL state updates happen immediately on the DOM
+    // This prevents the UI from freezing when stopping execution
+    flushSync(() => {
+      setLoading(false);
+      setIsCompiling(false);
+      setPercentageItems([]);
+    });
+    
+    // Add output message SEPARATELY (outside of flushSync) to avoid nested state conflicts
+    if (wasRunning && reason) {
+      mockAppendOutput(currentTab, `🛑 ${reason}`);
+    } else if (!wasRunning) {
+      mockAppendOutput(currentTab, `ℹ️ No process running to stop`);
     }
-    if ((loading || isCompiling) && reason) mockAppendOutput(currentTab, `🛑 ${reason}`);
-    setLoading(false);
-    setIsCompiling(false);
-    setPercentageItems([]);
+    
+    console.log("[UI-STOP] State flushed - UI should be responsive now");
+    
+    // Now try to stop the backend process with timeout - don't let it hang the UI
+    if (window.electronAPI?.stopRun) {
+      try {
+        // Set a very short timeout so we don't wait forever for the backend
+        const stopPromise = window.electronAPI.stopRun();
+        const stopTimeout = new Promise((resolve) => 
+          setTimeout(() => {
+            console.warn("[UI-STOP] Backend stop timeout - ignoring");
+            resolve({ ok: false, stopped: false, message: "timeout" });
+          }, 1000)
+        );
+        
+        // Don't await - just fire and forget
+        Promise.race([stopPromise, stopTimeout]).then((result: any) => {
+          console.log("[UI-STOP] Backend stop result:", result);
+          if (result.ok && result.stopped) {
+            console.log("[UI-STOP] Process killed successfully");
+          } else {
+            console.warn("[UI-STOP] Stop request did not terminate process immediately", result);
+          }
+        }).catch((error) => {
+          console.error("[UI-STOP] Failed to stop backend:", error);
+        });
+      } catch (error) { 
+        console.error("[UI-STOP] Failed to stop backend:", error);
+      }
+    } else {
+      console.warn("[UI-STOP] electronAPI.stopRun not available");
+    }
+    
+    console.log("[UI-STOP] Stop execution complete - UI should be responsive now");
+    
+    // Reset the stop flag after longer delay to ensure backend output stops
+    // This prevents stale output events from updating state after stop
+    setTimeout(() => {
+      stopRequestedRef.current = false;
+      console.log("[UI-STOP] stopRequestedRef reset to false - new execution available");
+    }, 500);
   };
 
   const switchTab = (tabId: Tab) => {
-    void stopExecution("Language switched");
+    stopExecution("Language switched");
     setTerminalOutputs({ c: "", java: "", python: "", solidity: "" });
     setChartData([]);
     setPercentageItems([]);
@@ -1354,7 +1593,7 @@ export default function ToolsContent() {
   };
 
   const handleToolChange = (value: string) => {
-    void stopExecution("Tool switched");
+    stopExecution("Tool switched");
     setTerminalOutputs({ c: "", java: "", python: "", solidity: "" });
     setChartData([]);
     setPercentageItems([]);
@@ -1491,6 +1730,12 @@ export default function ToolsContent() {
   };
 
   const executeCommand = async (type: Tab) => {
+    // Prevent multiple concurrent executions
+    if (loading) {
+      mockAppendOutput(type, "⚠️ Execution already in progress. Click Stop first.");
+      return;
+    }
+
     // Strict auth check - no tool execution without valid session
     if (!isAuthenticated) {
       mockAppendOutput(type, "❌ Session expired. Please login again.");
@@ -1529,6 +1774,7 @@ export default function ToolsContent() {
       return;
     }
 
+    console.log("[EXEC] executeCommand start", { type, tool: currentTool, inputMode, sourceType: inputMode, currentTab, loading, isCompiling });
     setTerminalOutputs((prev) => ({ ...prev, [type]: "" }));
 
     // Check tool selection
@@ -1621,19 +1867,65 @@ export default function ToolsContent() {
 
     let result;
     try {
-      result = await window.electronAPI.runTool({
-        language: type,
-        tool: currentTool,
-        sourceType: sourceType as any,
-        samplePath: sourceType === "sample" ? sourcePath : undefined,
-        filePath: sourceType === "file" ? sourcePath : undefined,
-        folderPath: sourceType === "folder" ? sourcePath : undefined,
-        codeContent: sourceType === "code" ? codeContent : undefined,
-        params,
-        compile: false, // executeCommand runs analysis tools
+      // Create a wrapper Promise that can be aborted
+      let resolveWrapper: ((value: any) => void) | null = null;
+      let rejectWrapper: ((error: any) => void) | null = null;
+      
+      const abortablePromise = new Promise((resolve, reject) => {
+        resolveWrapper = resolve;
+        rejectWrapper = reject;
       });
+      
+      // Add the handlers to the pending list so stopExecution can abort it
+      if (resolveWrapper && rejectWrapper) {
+        pendingPromisesRef.current.push({
+          resolve: resolveWrapper,
+          reject: rejectWrapper,
+        });
+      }
+      
+      // Add generous 2-hour timeout for security analysis tools (can take a long time)
+      const backendTimeoutMs = 2 * 60 * 60 * 1000; // 2 hours
+      const frontendTimeoutPromise = new Promise((_, reject) => {
+        const timeoutId = setTimeout(() => {
+          reject(new Error("Analysis timeout: Tool took longer than 2 hours"));
+        }, backendTimeoutMs);
+        timerIdsRef.current.push(timeoutId);
+      });
+
+      // Run the actual tool execution in the background
+      if (resolveWrapper && rejectWrapper) {
+        window.electronAPI.runTool({
+          language: type,
+          tool: currentTool,
+          sourceType: sourceType as any,
+          samplePath: sourceType === "sample" ? sourcePath : undefined,
+          filePath: sourceType === "file" ? sourcePath : undefined,
+          folderPath: sourceType === "folder" ? sourcePath : undefined,
+          codeContent: sourceType === "code" ? codeContent : undefined,
+          params,
+          compile: false, // executeCommand runs analysis tools
+        }).then(resolveWrapper).catch(rejectWrapper);
+      }
+
+      result = await Promise.race([
+        abortablePromise,
+        frontendTimeoutPromise,
+      ]) as any;
+      
+      // Remove from pending if successful
+      pendingPromisesRef.current = [];
+      
     } catch (error) {
-      mockAppendOutput(type, `❌ ${error instanceof Error ? error.message : "Unknown"}`);
+      // Remove from pending on error
+      pendingPromisesRef.current = [];
+      
+      if (stopRequestedRef.current) {
+        console.log("[EXEC] Tool execution was stopped by user");
+        mockAppendOutput(type, "🛑 Tool execution stopped");
+      } else {
+        mockAppendOutput(type, `❌ ${error instanceof Error ? error.message : "Unknown"}`);
+      }
       setLoading(false);
       return;
     }
@@ -1745,6 +2037,18 @@ export default function ToolsContent() {
       setVisualizationTitle(nextTitle);
       setPercentageItems(nextPercentageItems);
 
+      // Check if process was stopped by user
+      if (stopRequestedRef.current) {
+        console.log("[EXEC] Process was stopped by user request");
+        mockAppendOutput(type, "🛑 Tool execution stopped");
+        setLoading(false);
+        // Reset stop flag
+        setTimeout(() => {
+          stopRequestedRef.current = false;
+        }, 100);
+        return;
+      }
+
       // Show output first, then status
       if (result.output) {
         // Has output - execution happened (successful execution)
@@ -1752,8 +2056,10 @@ export default function ToolsContent() {
           mockAppendOutput(type, "✅ Execution completed.");
         }
         
-        // Trial consumption must be decided by backend, never by sessionStorage.
-        await deductTrialAndCheckStatus();
+        // Only deduct trial if execution happened (not if compilation failed)
+        if (result.trialDeducted !== false) {
+          await deductTrialAndCheckStatus();
+        }
       } else if (!result.ok) {
         // No output and not ok - actual failure
         mockAppendOutput(type, `❌ Failed${result.error ? `: ${result.error}` : ""}`);
@@ -1775,6 +2081,12 @@ export default function ToolsContent() {
   };
 
   const compileCode = async (type: Tab) => {
+    // Prevent multiple concurrent compilations
+    if (isCompiling) {
+      mockAppendOutput(type, "⚠️ Compilation already in progress. Click Stop first.");
+      return;
+    }
+
     // Auth check
     if (!isAuthenticated) {
       mockAppendOutput(type, "❌ Session expired. Please login again.");
@@ -1797,6 +2109,7 @@ export default function ToolsContent() {
 
     setTerminalOutputs((prev) => ({ ...prev, [type]: "" }));
     setIsCompiling(true);
+    console.log("[COMPILE] compileCode start", { type, tool: currentTool, inputMode, currentTab });
 
     const compactTools = new Set([
       DSE_MUTATION_TOOL,
@@ -1880,24 +2193,93 @@ export default function ToolsContent() {
 
     let result;
     try {
-      result = await window.electronAPI.runTool({
-        language: type,
-        tool: currentTool, // Still pass tool for consistency
-        sourceType: sourceType as any,
-        samplePath: sourceType === "sample" ? sourcePath : undefined,
-        filePath: sourceType === "file" ? sourcePath : undefined,
-        folderPath: sourceType === "folder" ? sourcePath : undefined,
-        codeContent: sourceType === "code" ? codeContent : undefined,
-        params,
-        compile: true, // compileCode executes the code
+      // Create a wrapper Promise that can be aborted
+      let resolveWrapper: ((value: any) => void) | null = null;
+      let rejectWrapper: ((error: any) => void) | null = null;
+      
+      const abortablePromise = new Promise((resolve, reject) => {
+        resolveWrapper = resolve;
+        rejectWrapper = reject;
       });
+      
+      // Add the handlers to the pending list so stopExecution can abort it
+      if (resolveWrapper && rejectWrapper) {
+        pendingPromisesRef.current.push({
+          resolve: resolveWrapper,
+          reject: rejectWrapper,
+        });
+      }
+      
+      // Add 35-second timeout on frontend (backend is 30s, +5s buffer)
+      const frontendTimeoutPromise = new Promise((_, reject) => {
+        const timeoutId = setTimeout(() => {
+          reject(new Error("Compilation timeout: Process took longer than 35 seconds"));
+        }, 35000);
+        timerIdsRef.current.push(timeoutId);
+      });
+
+      // Run the actual tool execution in the background
+      if (resolveWrapper && rejectWrapper) {
+        console.log("[COMPILE] Sending runTool payload", {
+          language: type,
+          tool: currentTool,
+          sourceType,
+          samplePath: sourceType === "sample" ? sourcePath : undefined,
+          filePath: sourceType === "file" ? sourcePath : undefined,
+          folderPath: sourceType === "folder" ? sourcePath : undefined,
+          codeContent: sourceType === "code" ? codeContent : undefined,
+          params,
+          compile: true,
+        });
+        window.electronAPI.runTool({
+          language: type,
+          tool: currentTool,
+          sourceType: sourceType as any,
+          samplePath: sourceType === "sample" ? sourcePath : undefined,
+          filePath: sourceType === "file" ? sourcePath : undefined,
+          folderPath: sourceType === "folder" ? sourcePath : undefined,
+          codeContent: sourceType === "code" ? codeContent : undefined,
+          params,
+          compile: true,
+        }).then(resolveWrapper).catch(rejectWrapper);
+      }
+
+      // Race between the tool promise and timeout
+      result = await Promise.race([
+        abortablePromise,
+        frontendTimeoutPromise,
+      ]) as any;
+      
+      // Remove from pending if successful
+      pendingPromisesRef.current = [];
+      
     } catch (error) {
-      mockAppendOutput(type, `❌ ${error instanceof Error ? error.message : "Unknown"}`);
+      // Remove from pending on error
+      pendingPromisesRef.current = [];
+      
+      if (stopRequestedRef.current) {
+        console.log("[COMPILE] Compilation was stopped by user");
+        mockAppendOutput(type, "🛑 Compilation stopped");
+      } else {
+        mockAppendOutput(type, `❌ ${error instanceof Error ? error.message : "Unknown error"}`);
+      }
       setIsCompiling(false);
       return;
     }
 
     // Process result
+    if (stopRequestedRef.current) {
+      // Process was stopped by user - treat as successful stop
+      console.log("[COMPILE] Process was stopped by user request");
+      mockAppendOutput(type, "🛑 Compilation stopped");
+      setIsCompiling(false);
+      // Reset stop flag
+      setTimeout(() => {
+        stopRequestedRef.current = false;
+      }, 100);
+      return;
+    }
+    
     if (result.output) {
       // Has output - execution happened (successful execution)
       if (result.output.includes("\n")) {
@@ -1909,8 +2291,10 @@ export default function ToolsContent() {
         mockAppendOutput(type, "✅ Execution completed.");
       }
       
-      // Trial consumption must be decided by backend, never by sessionStorage.
-      await deductTrialAndCheckStatus();
+      // Only deduct trial if execution happened (not if compilation failed)
+      if (result.trialDeducted !== false) {
+        await deductTrialAndCheckStatus();
+      }
     } else if (!result.ok) {
       // No output and not ok - actual failure
       mockAppendOutput(type, `❌ ${result.error || "Unknown error"}`);
@@ -1946,35 +2330,58 @@ export default function ToolsContent() {
 
   /* ── Shared action buttons ── */
   const ActionButtons = () => (
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
       <button
         onClick={() => executeCommand(currentTab)}
         disabled={loading}
-        style={{ ...S.btn(TOKEN.green), opacity: loading ? 0.75 : 1 }}
+        style={{
+          padding: "12px 16px",
+          borderRadius: 10,
+          border: "none",
+          background: loading ? "linear-gradient(135deg, #86efac, #34d399)" : TOKEN.greenGradient,
+          color: "#fff",
+          fontSize: 13,
+          fontWeight: 700,
+          cursor: loading ? "not-allowed" : "pointer",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 7,
+          boxShadow: loading ? "0 2px 8px rgba(74,222,128,0.3)" : TOKEN.shadowMd,
+          transition: "all 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
+          opacity: loading ? 0.85 : 1,
+        }}
+        onMouseEnter={(e) => !loading && (e.currentTarget.style.transform = "translateY(-2px)")}
+        onMouseLeave={(e) => !loading && (e.currentTarget.style.transform = "translateY(0)")}
       >
         {loading
-          ? <><FaSpinner style={{ animation: "spin 1s linear infinite" }} size={12} /> Running…</>
+          ? <><FaSpinner style={{ animation: "spin 1s linear infinite" }} size={13} /> Running…</>
           : "▶ Execute"}
       </button>
       <button
-        onClick={() => compileCode(currentTab)}
-        disabled={loading || isCompiling}
-        style={{ ...S.btn(TOKEN.orange), opacity: isCompiling ? 0.75 : 1 }}
-      >
-        {isCompiling
-          ? <><FaSpinner style={{ animation: "spin 1s linear infinite" }} size={12} /> Compiling…</>
-          : "⚙ Compile"}
-      </button>
-      <button
-        onClick={() => void stopExecution("Stopped")}
+        onClick={() => stopExecution("Stopped")}
         disabled={!loading && !isCompiling}
         style={{
-          ...S.btn(!loading && !isCompiling ? TOKEN.bgDeep : TOKEN.red,
-            !loading && !isCompiling ? TOKEN.textMuted : "#fff"),
-          border: !loading && !isCompiling ? `1px solid ${TOKEN.border}` : "none",
+          padding: "12px 16px",
+          borderRadius: 10,
+          border: (!loading && !isCompiling) ? "2px solid #e2e8f0" : "none",
+          background: (!loading && !isCompiling) ? "#f1f5f9" : TOKEN.redGradient,
+          color: (!loading && !isCompiling) ? "#94a3b8" : "#fff",
+          fontSize: 13,
+          fontWeight: 700,
+          cursor: (!loading && !isCompiling) ? "not-allowed" : "pointer",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 7,
+          boxShadow: (!loading && !isCompiling) ? "none" : TOKEN.shadowMd,
+          transition: "all 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
+          opacity: (!loading && !isCompiling) ? 0.65 : 1,
         }}
+        onMouseEnter={(e) => (loading || isCompiling) && (e.currentTarget.style.transform = "translateY(-2px)")}
+        onMouseLeave={(e) => (loading || isCompiling) && (e.currentTarget.style.transform = "translateY(0)")}
       >
-        <FiSquare size={12} /> Stop
+        <FiSquare size={13} /> Stop
       </button>
     </div>
   );
@@ -2029,17 +2436,26 @@ export default function ToolsContent() {
       style={{
         height: "100vh", overflow: "hidden",
         display: "flex", flexDirection: "column",
-        background: TOKEN.bgSurface,
-        padding: "14px 16px 12px", gap: 10,
-        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+        background: "linear-gradient(135deg, #f0f4ff 0%, #e0e7ff 50%, #f0f9ff 100%)",
+        padding: "20px 24px 16px", gap: 14,
+        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", sans-serif',
       }}
     >
       <style>{`
         @keyframes spin { to { transform: rotate(360deg); } }
+        @keyframes shimmer {
+          0% { background-position: -200% center; }
+          100% { background-position: 200% center; }
+        }
+        @keyframes fadeIn {
+          from { opacity: 0; transform: translateY(10px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
         * { box-sizing: border-box; }
-        ::-webkit-scrollbar { width: 5px; height: 5px; }
-        ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 99px; }
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: rgba(15,23,42,0.05); border-radius: 10px; }
+        ::-webkit-scrollbar-thumb { background: linear-gradient(135deg, #6366f1, #8b5cf6); border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: linear-gradient(135deg, #4f46e5, #7c3aed); }
       `}</style>
 
       {/* ── Trial Exhaustion Warning ── */}
@@ -2081,68 +2497,157 @@ export default function ToolsContent() {
         </div>
       )}
 
-      {/* ── Header ── */}
-      <header
+      {/* ── Modern Header with Glassmorphism ── */}
+     <header
+  style={{
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 16,
+    flexWrap: "wrap",
+    background: "rgba(255, 255, 255, 0.92)",
+    backdropFilter: "blur(24px)",
+    WebkitBackdropFilter: "blur(24px)",
+    border: "1px solid rgba(226, 232, 240, 0.85)",
+    borderRadius: 24,
+    padding: "20px 28px",
+    boxShadow: `
+      0 10px 30px -10px rgba(0, 0, 0, 0.08),
+      0 4px 12px -2px rgba(99, 102, 241, 0.12)
+    `,
+    flexShrink: 0,
+    position: "relative",
+    overflow: "hidden",
+  }}
+>
+  {/* Subtle gradient overlay at top */}
+  <div
+    style={{
+      position: "absolute",
+      inset: 0,
+      background: "linear-gradient(to bottom, rgba(99,102,241,0.04), transparent)",
+      pointerEvents: "none",
+      borderRadius: 24,
+    }}
+  />
+
+  <div style={{ display: "flex", alignItems: "center", gap: 16, minWidth: 0 }}>
+    {/* Logo Container - Enhanced */}
+    <div
+      style={{
+        width: 68,
+        height: 68,
+        background: TOKEN.accentGradient,
+        borderRadius: 18,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        boxShadow: `
+          0 10px 20px rgba(99, 102, 241, 0.3),
+          inset 0 -4px 8px rgba(255,255,255,0.4)
+        `,
+        flexShrink: 0,
+        position: "relative",
+      }}
+    >
+      <div
         style={{
+          width: 52,
+          height: 52,
+          // background: "rgba(255,255,255,0.15)",
+          borderRadius: 14,
           display: "flex",
           alignItems: "center",
-          justifyContent: "space-between",
-          gap: 12,
-          flexWrap: "wrap",
-          background: TOKEN.bg,
-          border: `1px solid ${TOKEN.border}`,
-          borderRadius: 12,
-         
-          flexShrink: 0,
+          justifyContent: "center",
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-          <Image
-            src={logoSrc}
-            alt="NITMiner logo"
-            width={120}
-            height={48}
-            priority
-          />
-          <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: 34, fontWeight: 800, color: TOKEN.text, lineHeight: 1.2 }}>
-              TrustInn
-            </div>
-            <div style={{ fontSize: 15, color: TOKEN.textMuted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-              NITMiner Technologies Pvt. Ltd.
-            </div>
+        <Image
+          src={logoSrc}
+          alt="TrustInn logo"
+          width={46}
+          height={46}
+          priority
+          style={{ filter: "brightness(0) invert(1)" }}
+        />
+      </div>
+    </div>
+
+    {/* Brand Text */}
+    <div style={{ minWidth: 0 }}>
+      <div
+        style={{
+          fontSize: 30,
+          fontWeight: 800,
+          background: TOKEN.accentGradient,
+          WebkitBackgroundClip: "text",
+          WebkitTextFillColor: "transparent",
+          backgroundClip: "text",
+          lineHeight: 1.1,
+          letterSpacing: "-0.025em",
+        }}
+      >
+        TrustInn
+      </div>
+      <div
+        style={{
+          fontSize: 13.5,
+          color: TOKEN.textMuted,
+          fontWeight: 600,
+          marginTop: 3,
+          letterSpacing: "-0.01em",
+        }}
+      >
+        NITMiner Technologies Pvt. Ltd.
+      </div>
+    </div>
+  </div>
+
+  {/* Navigation / Session Button - Premium Look */}
+  <nav className="flex items-center gap-3 flex-wrap">
+    {!authLoading && userData && (
+      <button
+        onClick={() => setShowSessionModal(true)}
+        className={`group flex items-center gap-3.5 px-5 py-3 rounded-2xl border transition-all duration-300 shadow-sm active:scale-[0.97] hover:shadow-xl
+          ${userData.isPremium 
+            ? "bg-gradient-to-r from-emerald-50 to-green-50 border-emerald-200 hover:border-emerald-300 hover:from-emerald-100 hover:to-green-100" 
+            : "bg-gradient-to-r from-blue-50 to-indigo-50 border-blue-200 hover:border-blue-300 hover:from-blue-100 hover:to-indigo-100"
+          }`}
+      >
+        {/* Icon with subtle animation */}
+        <div className="relative">
+          {userData.isPremium ? (
+            <Crown 
+              size={22} 
+              className="text-emerald-600 transition-transform group-hover:scale-110" 
+            />
+          ) : (
+            <Lock 
+              size={22} 
+              className="text-blue-600 transition-transform group-hover:scale-110" 
+            />
+          )}
+        </div>
+
+        {/* Text Content */}
+        <div className="text-left leading-tight pr-1">
+          <div className="text-[10px] font-semibold tracking-[0.5px] text-gray-500 uppercase">
+            SESSION
+          </div>
+          <div className={`text-sm font-semibold tracking-tight ${
+            userData.isPremium ? "text-emerald-700" : "text-blue-700"
+          }`}>
+            {userData.isPremium ? "Premium Active" : "Free Session"}
           </div>
         </div>
 
-       <nav className="flex items-center gap-3 flex-wrap">
-  {!authLoading && userData && (
-    <button
-      onClick={() => setShowSessionModal(true)}
-      className={`flex items-center gap-3 px-4 py-2 rounded-xl border transition-all duration-200 shadow-sm hover:shadow-md active:scale-[0.98]
-        ${userData.isPremium 
-          ? "bg-green-50 border-green-200 hover:bg-green-100" 
-          : "bg-blue-50 border-blue-200 hover:bg-blue-100"
-        }`}
-    >
-      {/* Icon */}
-      {userData.isPremium ? (
-        <Crown size={20} className="text-green-600 shrink-0" />
-      ) : (
-        <Lock size={20} className="text-blue-600 shrink-0" />
-      )}
-
-      {/* Text Content */}
-      <div className="text-left leading-tight">
-        <div className="text-xs font-semibold text-gray-500">
-          session info
-        </div>
-
-       
-      </div>
-    </button>
-  )}
-</nav>
-      </header>
+        {/* Subtle indicator dot for premium */}
+        {userData.isPremium && (
+          <div className="w-2 h-2 rounded-full bg-emerald-500 ring-2 ring-emerald-200 animate-pulse" />
+        )}
+      </button>
+    )}
+  </nav>
+</header>
       
       {/* Session Info Modal */}
       <SessionCheckModal
@@ -2326,10 +2831,16 @@ export default function ToolsContent() {
       {/* ── Header with Refresh Button ── */}
       <div style={{
         display: "flex", alignItems: "center", justifyContent: "space-between",
-        padding: "8px 12px", background: TOKEN.bg, borderRadius: 8,
-        border: `1px solid ${TOKEN.border}`, flexShrink: 0
+        padding: "12px 16px", 
+        background: "rgba(255, 255, 255, 0.7)",
+        backdropFilter: "blur(10px)",
+        WebkitBackdropFilter: "blur(10px)",
+        borderRadius: 14,
+        border: "1px solid rgba(226, 232, 240, 0.6)",
+        boxShadow: TOKEN.shadow,
+        flexShrink: 0
       }}>
-        <span style={{ fontSize: 13, fontWeight: 600, color: TOKEN.text }}>
+        <span style={{ fontSize: 13, fontWeight: 700, color: TOKEN.text, letterSpacing: "0.01em" }}>
           Select Programming Language
         </span>
         <button
@@ -2354,13 +2865,19 @@ export default function ToolsContent() {
         </button>
       </div>
 
-      {/* ── Language Tabs — full width with icons ── */}
+      {/* ── Modern Language Tabs with Gradients ── */}
       <div
         style={{
           display: "grid", gridTemplateColumns: "repeat(4, 1fr)",
-          gap: 4, background: TOKEN.bg,
-          border: `1px solid ${TOKEN.border}`,
-          borderRadius: 11, padding: 4, flexShrink: 0,
+          gap: 6, 
+          background: "rgba(255, 255, 255, 0.6)",
+          backdropFilter: "blur(10px)",
+          WebkitBackdropFilter: "blur(10px)",
+          border: "1px solid rgba(226, 232, 240, 0.6)",
+          borderRadius: 16, 
+          padding: 6, 
+          flexShrink: 0,
+          boxShadow: TOKEN.shadow,
         }}
       >
         {(["c", "java", "python", "solidity"] as Tab[]).map((tab) => {
@@ -2371,16 +2888,26 @@ export default function ToolsContent() {
               key={tab}
               onClick={() => switchTab(tab)}
               style={{
-                padding: "8px 0", borderRadius: 8, border: "none",
-                fontSize: 19, fontWeight: active ? 700 : 500,
+                padding: "14px 0", 
+                borderRadius: 12, 
+                border: "none",
+                fontSize: 15, 
+                fontWeight: active ? 700 : 600,
                 cursor: "pointer",
-                background: active ? TOKEN.text : "transparent",
-                color: active ? "#f9fafb" : TOKEN.textSub,
-                display: "flex", alignItems: "center", justifyContent: "center", gap: 7,
-                transition: "all 0.15s",
+                background: active ? TOKEN.accentGradient : "rgba(255, 255, 255, 0.4)",
+                color: active ? "#ffffff" : TOKEN.textSub,
+                display: "flex", 
+                alignItems: "center", 
+                justifyContent: "center", 
+                gap: 8,
+                transition: "all 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
+                boxShadow: active ? TOKEN.shadowMd : "0 1px 2px rgba(0,0,0,0.05)",
+                transform: active ? "translateY(-1px)" : "translateY(0)",
               }}
+              onMouseEnter={(e) => !active && (e.currentTarget.style.background = "rgba(255, 255, 255, 0.8)")}
+              onMouseLeave={(e) => !active && (e.currentTarget.style.background = "rgba(255, 255, 255, 0.4)")}
             >
-              <Icon size={19} style={{ color: active ? "#fff" : iconColor, flexShrink: 0 }} />
+              <Icon size={18} style={{ color: active ? "#fff" : iconColor, flexShrink: 0 }} />
               {label}
             </button>
           );
@@ -2540,6 +3067,10 @@ export default function ToolsContent() {
                     </div>
                   )}
 
+                  <div style={{ background: "#fef3c7", border: "1px solid #f59e0b", borderRadius: 8, padding: "7px 10px", fontSize: 11, color: "#92400e", lineHeight: 1.5 }}>
+                    ⚠️ Make sure there are no infinite loops in your code. Use the Stop button if execution hangs.
+                  </div>
+
                   <div
                     onClick={currentTab === "solidity" && soliditySourceMode === "folder" ? browseSolidityFolder : browseLocalFile}
                     style={{
@@ -2605,13 +3136,16 @@ export default function ToolsContent() {
                   <div style={{ background: "#d1fae5", border: "1px solid #6ee7b7", borderRadius: 8, padding: "7px 10px", fontSize: 11, color: "#065f46", lineHeight: 1.5 }}>
                     ✅ Write or paste your code below, select a security tool, and click Execute to analyze it.
                   </div>
+                  <div style={{ background: "#fef3c7", border: "1px solid #f59e0b", borderRadius: 8, padding: "7px 10px", fontSize: 11, color: "#92400e", lineHeight: 1.5 }}>
+                    ⚠️ Make sure there are no infinite loops in your code. Use the Stop button if execution hangs.
+                  </div>
                   <Suspense fallback={<div style={{ height: 160, background: TOKEN.bgDeep, borderRadius: 8 }} />}>
                     <CodeEditor
                       code={userCode[currentTab]}
                       language={currentTab}
                       onCodeChange={(code: string) => setUserCode((prev) => ({ ...prev, [currentTab]: code }))}
                       onExecute={() => executeCommand(currentTab)}
-                      onStop={() => void stopExecution("Stopped")}
+                      onStop={() => stopExecution("Stopped")}
                       isExecuting={loading}
                       toolSelected={inputMode === "code" ? true : Boolean(currentTool)}
                       onCompile={() => compileCode(currentTab)}
@@ -2624,36 +3158,57 @@ export default function ToolsContent() {
           </div>
         </div>
 
-        {/* ── Right Panel: Terminal ── */}
+        {/* ── Right Panel: Modern Terminal ── */}
         <div
           style={{
-            background: TOKEN.termSurface,
-            borderRadius: 12,
-            border: `1px solid ${TOKEN.termBorder}`,
+            background: "linear-gradient(135deg, #0f172a 0%, #1e293b 100%)",
+            borderRadius: 16,
+            border: "1px solid rgba(148, 163, 184, 0.15)",
             display: "flex", flexDirection: "column",
             overflow: "hidden",
+            boxShadow: TOKEN.shadowXl,
           }}
         >
-          {/* Terminal header — Stop + Analytics live here */}
+          {/* Terminal header with glassmorphism */}
           <div
             style={{
-              padding: "8px 12px",
-              borderBottom: `1px solid ${TOKEN.termBorder}`,
-              display: "flex", alignItems: "center", gap: 6,
+              padding: "12px 16px",
+              borderBottom: "1px solid rgba(148, 163, 184, 0.1)",
+              display: "flex", alignItems: "center", gap: 8,
               flexShrink: 0,
+              background: "rgba(30, 41, 59, 0.5)",
+              backdropFilter: "blur(8px)",
+              WebkitBackdropFilter: "blur(8px)",
             }}
           >
-            {/* macOS window dots */}
-            <div style={{ display: "flex", gap: 5, flexShrink: 0, marginRight: 4 }}>
-              {["#f97373", "#facc15", "#34d399"].map((c) => (
-                <span key={c} style={{ width: 9, height: 9, borderRadius: "50%", background: c }} />
+            {/* macOS window dots with enhanced styling */}
+            <div style={{ display: "flex", gap: 6, flexShrink: 0, marginRight: 6 }}>
+              {["#ef4444", "#f59e0b", "#10b981"].map((c, idx) => (
+                <div
+                  key={c}
+                  style={{
+                    width: 12,
+                    height: 12,
+                    borderRadius: "50%",
+                    background: c,
+                    boxShadow: `0 0 8px ${c}50`,
+                    cursor: "pointer",
+                    transition: "transform 0.2s",
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.transform = "scale(1.1)")}
+                  onMouseLeave={(e) => (e.currentTarget.style.transform = "scale(1)")}
+                />
               ))}
             </div>
 
             <span
               style={{
-                fontSize: 11, color: "#9ca3af",
-                fontFamily: '"JetBrains Mono", monospace', flexShrink: 0,
+                fontSize: 12, 
+                color: "#94a3b8",
+                fontFamily: '"JetBrains Mono", monospace', 
+                flexShrink: 0,
+                fontWeight: 600,
+                letterSpacing: "0.02em",
               }}
             >
               Terminal · {currentTab.toUpperCase()}
@@ -2696,15 +3251,29 @@ export default function ToolsContent() {
 
               {/* Stop */}
               <button
-                onClick={() => void stopExecution("Execution stopped")}
-                disabled={!loading && !isCompiling}
-                title="Stop execution"
+                onClick={() => {
+                  console.log("[UI] Stop button clicked - loading:", loading, "isCompiling:", isCompiling);
+                  // Always allow clicking - stopExecution handles the logic
+                  stopExecution("User stopped execution");
+                }}
+                title={loading || isCompiling ? "Click to stop execution" : "No execution running"}
                 style={{
                   ...S.termBtn,
-                  color: (!loading && !isCompiling) ? "#374151" : "#f87171",
-                  opacity: (!loading && !isCompiling) ? 0.45 : 1,
-                  cursor: (!loading && !isCompiling) ? "not-allowed" : "pointer",
+                  color: (loading || isCompiling) ? "#f87171" : "#374151",
+                  opacity: (loading || isCompiling) ? 1 : 0.4,
+                  cursor: "pointer", // Always allow clicks
                   gap: 4,
+                  fontWeight: 600,
+                  pointerEvents: "auto", // Always allow clicks
+                  transition: "all 0.2s ease",
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.color = (loading || isCompiling) ? "#ff6b6b" : "#f87171";
+                  e.currentTarget.style.opacity = "1";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.color = (loading || isCompiling) ? "#f87171" : "#374151";
+                  e.currentTarget.style.opacity = (loading || isCompiling) ? "1" : "0.4";
                 }}
               >
                 <FiStopCircle size={13} /> Stop
@@ -2713,23 +3282,33 @@ export default function ToolsContent() {
               {/* Separator */}
               <span style={{ width: 1, height: 14, background: "#1e293b", margin: "0 4px" }} />
 
-              {/* View Analytics — accent pill */}
+              {/* View Analytics — gradient accent pill */}
               <button
                 onClick={() => setDrawerOpen(true)}
                 title="View analytics"
                 style={{
                   ...S.termBtn,
-                  color: "#818cf8",
-                  background: "rgba(99,102,241,0.12)",
-                  border: "1px solid rgba(99,102,241,0.2)",
-                  borderRadius: 6,
-                  padding: "3px 9px",
+                  color: "#fff",
+                  background: TOKEN.accentGradient,
+                  border: "none",
+                  borderRadius: 8,
+                  padding: "6px 12px",
                   fontWeight: 600,
                   fontSize: 11,
-                  gap: 5,
+                  gap: 6,
+                  boxShadow: "0 4px 12px rgba(99,102,241,0.3)",
+                  transition: "all 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.transform = "translateY(-1px)";
+                  e.currentTarget.style.boxShadow = "0 6px 16px rgba(99,102,241,0.4)";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.transform = "translateY(0)";
+                  e.currentTarget.style.boxShadow = "0 4px 12px rgba(99,102,241,0.3)";
                 }}
               >
-                <FiBarChart2 size={12} /> View Analytics
+                <FiBarChart2 size={13} /> View Analytics
               </button>
             </div>
           </div>

@@ -139,11 +139,14 @@ export default function CodeEditor({
 
           {/* Stop */}
           <button
-            onClick={() => onStop?.()}
-            disabled={!onStop || (!isExecuting && !isCompiling)}
+            onClick={() => {
+              console.log("[CODEEDITOR] Stop clicked", { isExecuting, isCompiling });
+              onStop?.();
+            }}
+            disabled={!onStop}
             className={`rounded-lg px-4 py-2 text-[11px] font-bold border ml-auto transition-all
               ${
-                !onStop || (!isExecuting && !isCompiling)
+                !onStop
                   ? 'border-red-100 bg-red-50 text-red-200 cursor-not-allowed'
                   : 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100 active:scale-95'
               }
