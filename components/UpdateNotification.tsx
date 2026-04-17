@@ -22,6 +22,9 @@ interface ElectronAPI {
   onUpdateAvailable?: (callback: (info: UpdateInfo) => void) => void;
   onUpdateProgress?: (callback: (progress: DownloadProgress) => void) => void;
   onUpdateDownloaded?: (callback: () => void) => void;
+  onUpdateNotAvailable?: (callback: (info: any) => void) => void;
+  onUpdateError?: (callback: (error: any) => void) => void;
+  checkForUpdates?: () => Promise<any>;
 }
 
 export function UpdateNotification() {
@@ -135,5 +138,48 @@ export function UpdateNotification() {
         )}
       </div>
     </div>
+  );
+}
+
+export function CheckForUpdateButton() {
+  const [isChecking, setIsChecking] = useState(false);
+  const [lastChecked, setLastChecked] = useState<string>("");
+
+  const handleCheckForUpdates = async () => {
+    setIsChecking(true);
+    try {
+      const result = await (window as any).electronAPI?.checkForUpdates?.();
+      if (result?.ok) {
+        if (result.updateAvailable) {
+          console.log("Update available:", result.version);
+          // Update notification will appear automatically
+        } else {
+          setLastChecked("✓ You're up to date!");
+          setTimeout(() => setLastChecked(""), 3000);
+        }
+      }
+    } catch (error) {
+      console.error("Update check error:", error);
+      setLastChecked("⚠️ Check failed");
+      setTimeout(() => setLastChecked(""), 3000);
+    } finally {
+      setIsChecking(false);
+    }
+  };
+
+  return (
+    <button
+      onClick={handleCheckForUpdates}
+      disabled={isChecking}
+      className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all
+        bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 
+        hover:from-blue-100 hover:to-indigo-100 hover:border-blue-300
+        active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+      title="Check for application updates"
+    >
+      <FiDownload className={`text-base ${isChecking ? "animate-spin" : ""}`} />
+      <span>{isChecking ? "Checking..." : "Check Updates"}</span>
+      {lastChecked && <span className="text-xs ml-1 text-gray-600">{lastChecked}</span>}
+    </button>
   );
 }

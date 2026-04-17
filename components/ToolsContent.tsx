@@ -16,6 +16,7 @@ import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneLight } from "react-syntax-highlighter/dist/cjs/styles/prism";
 import Image from "next/image";
 import { SessionCheckModal } from "@/components/SessionInfoModal";
+import { CheckForUpdateButton } from "@/components/UpdateNotification";
 
 const CodeEditor = lazy(() => import("@/components/CodeEditor"));
 
@@ -2660,6 +2661,7 @@ export default function ToolsContent() {
         )}
       </button>
     )}
+    <CheckForUpdateButton />
   </nav>
 </header>
       

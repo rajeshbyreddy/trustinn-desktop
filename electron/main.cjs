@@ -45,22 +45,6 @@ function getFileExtension(language) {
   }
 }
 
-function buildDockerRunArgs(tempDir, containerArgs) {
-  const workDir = "/workspace";
-  return [
-    "run",
-    "--platform",
-    DEFAULT_PLATFORM,
-    "--rm",
-    "-v",
-    `${getDockerVolumePath(tempDir)}:${workDir}:rw`,
-    "-w",
-    workDir,
-    DEFAULT_IMAGE,
-    ...containerArgs,
-  ];
-}
-
 function resolveStaticRouteHtml(route) {
   const normalized = normalizeAppRoute(route);
   const relativePath = normalized === "/"
@@ -574,23 +558,50 @@ function setupAutoUpdater() {
     return;
   }
 
-  autoUpdater.checkForUpdatesAndNotify();
+  console.log("[UPDATE] Setting up auto-updater for", app.getVersion());
+
+  // Check for updates immediately and every 30 minutes
+  const checkUpdates = () => {
+    console.log("[UPDATE] Checking for updates...");
+    autoUpdater.checkForUpdates().catch((err) => {
+      console.error("[UPDATE] Check failed:", err);
+    });
+  };
+
+  // Initial check after app loads
+  checkUpdates();
+
+  // Schedule periodic checks every 30 minutes
+  const updateCheckInterval = setInterval(() => {
+    checkUpdates();
+  }, 30 * 60 * 1000); // 30 minutes
 
   autoUpdater.on("update-available", (info) => {
-    console.log("[UPDATE] Update available:", info.version);
+    console.log("[UPDATE] Update available:", info.version, "Current:", app.getVersion());
     if (mainWindow) {
       mainWindow.webContents.send("update:available", info);
       dialog.showMessageBox(mainWindow, {
         type: "info",
-        title: "Update Available",
-        message: `TrustINN ${info.version} is available.`,
-        detail: "Click UPDATE to install the latest version.",
-        buttons: ["Update", "Later"],
+        title: "🆕 Update Available",
+        message: `TrustINN ${info.version} is available (Current: ${app.getVersion()})`,
+        detail: "A new version is ready to download and install.",
+        buttons: ["Download & Install", "Later"],
         defaultId: 0,
       }).then((result) => {
         if (result.response === 0) {
+          console.log("[UPDATE] User chose to download update");
           autoUpdater.downloadUpdate();
         }
+      });
+    }
+  });
+
+  autoUpdater.on("update-not-available", (info) => {
+    console.log("[UPDATE] You're up to date!", info.version);
+    if (mainWindow) {
+      mainWindow.webContents.send("update:not-available", {
+        version: app.getVersion(),
+        message: "You're running the latest version!"
       });
     }
   });
@@ -601,13 +612,14 @@ function setupAutoUpdater() {
       mainWindow.webContents.send("update:downloaded");
       dialog.showMessageBox(mainWindow, {
         type: "info",
-        title: "Update Ready",
+        title: "✅ Update Ready",
         message: "TrustINN update is ready to install.",
         detail: "The application will restart to apply the update.",
-        buttons: ["Install & Restart", "Later"],
+        buttons: ["Install & Restart Now", "Later"],
         defaultId: 0,
       }).then((result) => {
         if (result.response === 0) {
+          console.log("[UPDATE] Installing update...");
           autoUpdater.quitAndInstall();
         }
       });
@@ -615,6 +627,7 @@ function setupAutoUpdater() {
   });
 
   autoUpdater.on("download-progress", (progress) => {
+    console.log(`[UPDATE] Download progress: ${Math.round(progress.percent)}%`);
     if (mainWindow) {
       mainWindow.webContents.send("update:progress", progress);
     }
@@ -622,6 +635,14 @@ function setupAutoUpdater() {
 
   autoUpdater.on("error", (error) => {
     console.error("[UPDATE] Error:", error);
+    if (mainWindow) {
+      mainWindow.webContents.send("update:error", { message: error.message });
+    }
+  });
+
+  // Cleanup on app quit
+  app.on("before-quit", () => {
+    clearInterval(updateCheckInterval);
   });
 }
 
@@ -686,6 +707,11 @@ function createMainWindow() {
     }
     mainWindow.webContents.openDevTools({ mode: "detach" });
   } else {
+    // PRODUCTION MODE - disable dev tools
+    if (mainWindow.webContents.isDevToolsOpened?.()) {
+      mainWindow.webContents.closeDevTools();
+    }
+    
     const indexPath = resolveStaticRouteHtml("/");
 
     if (!indexPath) {
@@ -889,6 +915,26 @@ app.whenReady().then(() => {
       autoUpdater.quitAndInstall();
     }
     return { ok: true };
+  });
+
+  ipcMain.handle("update:check-for-updates", async () => {
+    console.log("[IPC] Manual update check requested");
+    if (isDev) {
+      return { ok: false, message: "Update check disabled in development mode" };
+    }
+    try {
+      const result = await autoUpdater.checkForUpdates();
+      console.log("[IPC] Update check result:", result);
+      return { 
+        ok: true, 
+        updateAvailable: result?.updateInfo ? true : false,
+        version: result?.updateInfo?.version,
+        message: result?.updateInfo ? `Update ${result.updateInfo.version} available` : "You're up to date!"
+      };
+    } catch (error) {
+      console.error("[IPC] Update check error:", error);
+      return { ok: false, message: error.message };
+    }
   });
 
   ipcMain.handle("tools:read-file", async (_, filePath) => {
@@ -1209,86 +1255,63 @@ exit 1
       fs.writeFileSync(tempFilePath, codeContent);
 
       if (payload.compile) {
-        // Execute the code
-        let command = "";
-        let args = [];
-        let compileCommand = "";
-        let compileArgs = [];
-        const useDocker = IS_WIN;
-        const containerFilePath = `/workspace/${finalFileName}`;
+        // Execute code using Docker containers with standard images
+        // Java: openjdk:17
+        // Python: python:3
+        // C: gcc:latest
+        // Solidity: validation only
+        let dockerImage = "";
+        let dockerCmd = [];
+        let localCommand = "";
+        let localArgs = [];
 
         try {
+          const CUSTOM_IMAGE = process.env.TRUSTINN_IMAGE || "rajeshbyreddy95/trustinn-tools:19.0.0";
+          
           if (language === "java") {
-            if (useDocker) {
-              compileCommand = "docker";
-              compileArgs = buildDockerRunArgs(tempDir, ["run-tool", containerFilePath]);
-            } else {
-              compileCommand = "javac";
-              compileArgs = [tempFilePath];
-            }
-
-            const compileResult = await runProcess(compileCommand, compileArgs, {
-              trackProcess: true,
-              commandTimeout: 30000,
-              onData: (stream, data) => {
-                if (mainWindow) {
-                  mainWindow.webContents.send('code-output-live', { language, stream, data });
-                }
-              }
-            });
-
-            if (compileResult.code !== 0) {
-              fs.unlinkSync(tempFilePath);
-              return { ok: false, output: compileResult.stderr, error: "Compilation failed", command: `${compileCommand} ${compileArgs.join(" ")}`, trialDeducted: false };
-            }
-
-            if (useDocker) {
-              command = "docker";
-              args = buildDockerRunArgs(tempDir, ["run-tool", containerFilePath]);
-            } else {
-              command = "java";
-              args = ["-cp", tempDir, finalClassName];
-            }
+            dockerImage = CUSTOM_IMAGE;
+            dockerCmd = [
+              "run", "--rm",
+              "-v", `${getDockerVolumePath(tempDir)}:/app`,
+              "-w", "/app",
+              "--network", "none",
+              "--memory=256m",
+              "--cpus=1",
+              dockerImage,
+              "bash", "-c",
+              `javac ${finalFileName} && java ${finalClassName}`
+            ];
+            localCommand = "javac";
+            localArgs = [tempFilePath];
           } else if (language === "python") {
-            if (useDocker) {
-              command = "docker";
-              args = buildDockerRunArgs(tempDir, ["run-tool", containerFilePath]);
-            } else {
-              command = "python3";
-              args = [tempFilePath];
-            }
+            dockerImage = CUSTOM_IMAGE;
+            dockerCmd = [
+              "run", "--rm",
+              "-v", `${getDockerVolumePath(tempDir)}:/app`,
+              "-w", "/app",
+              "--network", "none",
+              "--memory=256m",
+              "--cpus=1",
+              dockerImage,
+              "python3", finalFileName
+            ];
+            localCommand = "python3";
+            localArgs = [tempFilePath];
           } else if (language === "c") {
-            const exePath = tempFilePath.replace(/\.c$/, "");
-            if (useDocker) {
-              compileCommand = "docker";
-              compileArgs = buildDockerRunArgs(tempDir, ["run-tool", containerFilePath]);
-            } else {
-              compileCommand = "gcc";
-              compileArgs = [tempFilePath, "-o", exePath];
-            }
-
-            const compileResult = await runProcess(compileCommand, compileArgs, {
-              trackProcess: true,
-              commandTimeout: 30000,
-              onData: (stream, data) => {
-                if (mainWindow) {
-                  mainWindow.webContents.send('code-output-live', { language, stream, data });
-                }
-              }
-            });
-
-            if (compileResult.code !== 0) {
-              fs.unlinkSync(tempFilePath);
-              return { ok: false, output: compileResult.stderr, error: "Compilation failed", command: `${compileCommand} ${compileArgs.join(" ")}`, trialDeducted: false };
-            }
-
-            if (useDocker) {
-              command = "docker";
-              args = buildDockerRunArgs(tempDir, ["run-tool", containerFilePath]);
-            } else {
-              command = exePath;
-              args = [];
-            }
+            dockerImage = CUSTOM_IMAGE;
+            dockerCmd = [
+              "run", "--rm",
+              "-v", `${getDockerVolumePath(tempDir)}:/app`,
+              "-w", "/app",
+              "--network", "none",
+              "--memory=256m",
+              "--cpus=1",
+              dockerImage,
+              "bash", "-c",
+              `gcc ${finalFileName} -o program && ./program`
+            ];
+            localCommand = "gcc";
+            localArgs = [tempFilePath, "-o", tempFilePath.replace(/\.c$/, "")];
           } else if (language === "solidity") {
             const sourceCode = fs.readFileSync(tempFilePath, "utf-8");
             fs.unlinkSync(tempFilePath);
@@ -1316,9 +1339,13 @@ exit 1
             return { ok: false, error: "Code execution not supported for this language", output: "", trialDeducted: false };
           }
 
+          // Run with Docker if on Windows, else use local tools
+          const command = IS_WIN ? "docker" : localCommand;
+          const args = IS_WIN ? dockerCmd : localArgs;
+
           const result = await runProcess(command, args, { 
-            trackProcess: true, // Track so Stop button can kill it
-            commandTimeout: 30000, // 30 second timeout to prevent infinite loops
+            trackProcess: true,
+            commandTimeout: 30000,
             onData: (stream, data) => {
               if (mainWindow) {
                 mainWindow.webContents.send('code-output-live', { language, stream, data });
@@ -1327,17 +1354,17 @@ exit 1
           });
           
           // Cleanup
-          fs.unlinkSync(tempFilePath);
-          if (language === "java") {
-            const classFile = path.join(tempDir, `${finalClassName}.class`);
-            if (fs.existsSync(classFile)) fs.unlinkSync(classFile);
-          } else if (language === "c") {
-            const exePath = tempFilePath.replace(/\.c$/, "");
-            if (fs.existsSync(exePath)) fs.unlinkSync(exePath);
+          try {
+            fs.unlinkSync(tempFilePath);
+            if (language === "c") {
+              const exePath = tempFilePath.replace(/\.c$/, "");
+              if (fs.existsSync(exePath)) fs.unlinkSync(exePath);
+            }
+          } catch (e) {
+            // Ignore cleanup errors
           }
 
-          // Execution always deducts trial (success or failure)
-          return { ok: result.code === 0, output: "", error: result.stderr, command: `${command} ${args.join(" ")}`, trialDeducted: true };
+          return { ok: result.code === 0, output: "", error: result.stderr, command: `${command} ${args.slice(0, 3).join(" ")}...`, trialDeducted: result.code === 0 };
         } catch (error) {
           // Cleanup on error
           if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
