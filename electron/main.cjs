@@ -57,8 +57,6 @@ function buildDockerRunArgs(tempDir, containerArgs) {
     "-w",
     workDir,
     DEFAULT_IMAGE,
-    "python",
-    "runner.py",
     ...containerArgs,
   ];
 }
