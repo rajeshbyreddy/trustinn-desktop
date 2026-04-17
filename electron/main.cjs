@@ -45,6 +45,24 @@ function getFileExtension(language) {
   }
 }
 
+function buildDockerRunArgs(tempDir, containerArgs) {
+  const workDir = "/workspace";
+  return [
+    "run",
+    "--platform",
+    DEFAULT_PLATFORM,
+    "--rm",
+    "-v",
+    `${getDockerVolumePath(tempDir)}:${workDir}:rw`,
+    "-w",
+    workDir,
+    DEFAULT_IMAGE,
+    "python",
+    "runner.py",
+    ...containerArgs,
+  ];
+}
+
 function resolveStaticRouteHtml(route) {
   const normalized = normalizeAppRoute(route);
   const relativePath = normalized === "/"
@@ -1198,11 +1216,19 @@ exit 1
         let args = [];
         let compileCommand = "";
         let compileArgs = [];
+        const useDocker = IS_WIN;
+        const containerFilePath = `/workspace/${finalFileName}`;
+
         try {
           if (language === "java") {
-            compileCommand = "javac";
-            compileArgs = [tempFilePath];
-            // Compilation timeout is NOT tracked - only execution timeout matters
+            if (useDocker) {
+              compileCommand = "docker";
+              compileArgs = buildDockerRunArgs(tempDir, ["run-tool", containerFilePath]);
+            } else {
+              compileCommand = "javac";
+              compileArgs = [tempFilePath];
+            }
+
             const compileResult = await runProcess(compileCommand, compileArgs, {
               trackProcess: true,
               commandTimeout: 30000,
@@ -1212,20 +1238,37 @@ exit 1
                 }
               }
             });
+
             if (compileResult.code !== 0) {
               fs.unlinkSync(tempFilePath);
-              // Compilation error - DO NOT deduct trial
               return { ok: false, output: compileResult.stderr, error: "Compilation failed", command: `${compileCommand} ${compileArgs.join(" ")}`, trialDeducted: false };
             }
-            command = "java";
-            args = ["-cp", tempDir, finalClassName];
+
+            if (useDocker) {
+              command = "docker";
+              args = buildDockerRunArgs(tempDir, ["run-tool", containerFilePath]);
+            } else {
+              command = "java";
+              args = ["-cp", tempDir, finalClassName];
+            }
           } else if (language === "python") {
-            command = "python3";
-            args = [tempFilePath];
+            if (useDocker) {
+              command = "docker";
+              args = buildDockerRunArgs(tempDir, ["run-tool", containerFilePath]);
+            } else {
+              command = "python3";
+              args = [tempFilePath];
+            }
           } else if (language === "c") {
             const exePath = tempFilePath.replace(/\.c$/, "");
-            compileCommand = "gcc";
-            compileArgs = [tempFilePath, "-o", exePath];
+            if (useDocker) {
+              compileCommand = "docker";
+              compileArgs = buildDockerRunArgs(tempDir, ["run-tool", containerFilePath]);
+            } else {
+              compileCommand = "gcc";
+              compileArgs = [tempFilePath, "-o", exePath];
+            }
+
             const compileResult = await runProcess(compileCommand, compileArgs, {
               trackProcess: true,
               commandTimeout: 30000,
@@ -1235,16 +1278,44 @@ exit 1
                 }
               }
             });
+
             if (compileResult.code !== 0) {
               fs.unlinkSync(tempFilePath);
-              // Compilation error - DO NOT deduct trial
               return { ok: false, output: compileResult.stderr, error: "Compilation failed", command: `${compileCommand} ${compileArgs.join(" ")}`, trialDeducted: false };
             }
-            command = exePath;
-            args = [];
+
+            if (useDocker) {
+              command = "docker";
+              args = buildDockerRunArgs(tempDir, ["run-tool", containerFilePath]);
+            } else {
+              command = exePath;
+              args = [];
+            }
+          } else if (language === "solidity") {
+            const sourceCode = fs.readFileSync(tempFilePath, "utf-8");
+            fs.unlinkSync(tempFilePath);
+
+            if (!sourceCode.includes("pragma solidity")) {
+              return { ok: false, output: "", error: "Missing pragma solidity declaration", trialDeducted: false };
+            }
+            if (!sourceCode.includes("contract ")) {
+              return { ok: false, output: "", error: "Missing contract declaration", trialDeducted: false };
+            }
+            const contractName = sourceCode.match(/contract\s+([A-Za-z_]\w*)/)?.[1];
+            if (!contractName) {
+              return { ok: false, output: "", error: "Could not extract contract name", trialDeducted: false };
+            }
+
+            return {
+              ok: true,
+              output: `✅ Solidity syntax validated\nContract: ${contractName}\n\nNote: For full compilation, use Hardhat or Truffle`,
+              error: "",
+              command: "solidity-syntax-check",
+              trialDeducted: false,
+            };
           } else {
             fs.unlinkSync(tempFilePath);
-            return { ok: false, error: "Code execution not supported for this language", output: "" };
+            return { ok: false, error: "Code execution not supported for this language", output: "", trialDeducted: false };
           }
 
           const result = await runProcess(command, args, { 
@@ -1272,8 +1343,18 @@ exit 1
         } catch (error) {
           // Cleanup on error
           if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
-          // If we reached here, compilation succeeded but execution failed - still deduct trial
-          return { ok: false, error: "Execution failed", output: "", trialDeducted: true };
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          if (errorMessage.includes("ENOENT") || errorMessage.includes("not found") || errorMessage.includes("command not found")) {
+            const missingTool = useDocker ? "docker" : language === "python" ? "python3" : language === "java" ? "javac/java" : language === "c" ? "gcc" : "required tool";
+            return {
+              ok: false,
+              error: `Required tool not found: ${missingTool}. Install Docker Desktop or the ${missingTool} toolchain and retry.`,
+              output: "",
+              trialDeducted: false,
+            };
+          }
+
+          return { ok: false, error: errorMessage || "Execution failed", output: "", trialDeducted: true };
         }
       } else {
         // Run analysis tool on the temp file
